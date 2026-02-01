@@ -45,21 +45,18 @@ MESS enables AI agents (like Claude) to request actions in the physical world:
 
 ## Getting Started
 
-### 1. Create a Private Data Repository
+### 1. Create Your MESS Exchange Repository
 
-1. Go to [github.com/new](https://github.com/new)
-2. Repository name: `mess-exchange` (or anything you like)
-3. **Select "Private"**
-4. Click "Create repository"
-5. Create the folder structure:
+This repository is a **template**. Use it to create your own MESS exchange:
 
-```
-exchange/
-├── state=received/    # New requests land here
-├── state=executing/   # Claimed/in-progress
-├── state=finished/    # Completed
-└── state=canceled/    # Failed/declined
-```
+1. Go to [github.com/teague/git-messe-af](https://github.com/teague/git-messe-af)
+2. Click the green **"Use this template"** button
+3. Select **"Create a new repository"**
+4. Name your repository (e.g., `mess-exchange`)
+5. **Select "Private"** to keep your tasks private
+6. Click **"Create repository"**
+
+Your new repo comes pre-configured with the folder structure, GitHub Actions, and client.
 
 ### 2. Create a GitHub Token
 

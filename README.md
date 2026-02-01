@@ -31,27 +31,26 @@ Dispatch physical-world tasks from AI agents to human executors using GitHub as 
 
 ## Quick Start
 
-### 1. Create a Private Data Repository
+### 1. Create Your MESS Exchange Repository
 
-1. Go to [github.com/new](https://github.com/new)
-2. Repository name: `mess-exchange` (or anything you like)
-3. **Select "Private"** ← Important!
-4. Click "Create repository"
-5. Create the folder structure (using Hive partitioning for DuckDB compatibility):
+This repository is a **template**. Click the button below to create your own MESS exchange:
 
-```
-exchange/
-├── state=received/    # New requests land here
-├── state=executing/   # Claimed/in-progress
-├── state=finished/    # Completed
-└── state=canceled/    # Failed/declined
-```
+[![Use this template](https://img.shields.io/badge/Use%20this%20template-238636?style=for-the-badge&logo=github&logoColor=white)](https://github.com/teague/git-messe-af/generate)
 
-You can create these folders by adding a `.gitkeep` file in each:
-- Click "Add file" → "Create new file"
-- Name: `exchange/state=received/.gitkeep`
-- Commit
-- Repeat for `state=executing`, `state=finished`, `state=canceled`
+Or manually:
+
+1. Click the green **"Use this template"** button at the top of this page
+2. Select **"Create a new repository"**
+3. Name your repository (e.g., `mess-exchange`)
+4. **Select "Private"** ← Important for keeping your tasks private
+5. Click **"Create repository"**
+
+Your new repo comes pre-configured with:
+- `exchange/` folder structure for task threads
+- `executors/` folder for executor configs
+- GitHub Actions for notifications
+- GitHub Pages workflow for hosting the client
+- MCP server for Claude integration
 
 ### 2. Create a GitHub Token
 
@@ -60,8 +59,8 @@ See the detailed guide below: [Creating a Minimal-Scope Token](#creating-a-minim
 ### 3. Open the Client
 
 The client can be:
-- **Hosted**: Deploy the HTML file to any static host
-- **Local file**: Just open `mess-client-v3.html` in your browser
+- **GitHub Pages**: Enable Pages in your repo settings (Source: GitHub Actions), then visit `https://your-username.github.io/your-repo-name/`
+- **Local file**: Just open `client/index.html` in your browser
 
 ### 4. Configure Your Executor Profile
 
@@ -222,12 +221,11 @@ Restart Claude Desktop. Now Claude can use `mess` and `mess_status` tools.
 
 ## Notifications
 
-The included GitHub Action sends notifications when new requests arrive.
+The included GitHub Action sends notifications when new requests arrive. If you created your repo from this template, the workflow is already included.
 
 ### Setup
 
-1. Copy `.github/workflows/notify.yml` to your data repo
-2. Add secrets (Settings → Secrets → Actions):
+Add secrets to your repo (Settings → Secrets and variables → Actions):
 
 **For Google Chat (Workspace users):**
 1. Open a Google Chat space
@@ -278,21 +276,25 @@ SENDGRID_FROM_EMAIL = noreply@yourdomain.com
 
 The client is a single HTML file with no build step. Host it anywhere:
 
-### Cloudflare Pages (Recommended)
+### GitHub Pages (Automatic)
+
+If you created your repo from this template, GitHub Pages deployment is already configured:
+
+1. Go to your repo's **Settings → Pages**
+2. Under "Build and deployment", select **Source: GitHub Actions**
+3. Push any change to `client/` or manually trigger the workflow
+4. Your client will be live at `https://your-username.github.io/your-repo-name/`
+
+### Cloudflare Pages
 1. Create a new Pages project
-2. Upload `mess-client-v3.html` as `index.html`
+2. Upload the `client/` folder
 3. Deploy
 
-### GitHub Pages
-1. Create a PUBLIC repo for the client (separate from your data repo)
-2. Add `index.html`
-3. Enable Pages in settings
-
 ### Netlify / Vercel
-Drag and drop the HTML file.
+Drag and drop the `client/` folder.
 
 ### Local File
-Just double-click `mess-client-v3.html` — it works offline once configured!
+Just open `client/index.html` in your browser — it works offline once configured!
 
 ---
 
