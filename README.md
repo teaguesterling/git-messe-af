@@ -1,6 +1,6 @@
 # MESS Exchange
 
-**M**eatspace **E**xchange for **S**ynchronous **S**ervices
+**M**eatspace **E**xecution and **S**ubmission **S**ystem
 
 Dispatch physical-world tasks from AI agents to human executors using GitHub as the backend.
 
