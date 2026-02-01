@@ -1,3 +1,8 @@
+---
+name: mess-server
+description: REST API for MESS Exchange Server. Self-hosted deployment with Docker, Kubernetes, or Cloudflare Workers. Event-sourced storage queryable with DuckDB.
+---
+
 # MESS Exchange Server API
 
 ## Overview

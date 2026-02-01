@@ -1,3 +1,8 @@
+---
+name: mess-mcp
+description: MCP server tools for creating and managing MESS physical-world task requests. Provides 'mess' and 'mess_status' tools for Claude Desktop integration.
+---
+
 # MESS MCP Server
 
 ## Overview

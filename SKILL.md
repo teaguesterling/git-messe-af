@@ -1,3 +1,8 @@
+---
+name: mess
+description: Request physical-world tasks from human executors. Use for observations, checks, actions, photos, and purchases that require physical presence.
+---
+
 # MESS - Meatspace Execution and Submission System
 
 ## Overview

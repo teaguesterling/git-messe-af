@@ -1,3 +1,8 @@
+---
+name: mess-client
+description: Web interface for human executors to view and respond to MESS requests. Static HTML/JS app with photo capture, offline support, and GitHub backend.
+---
+
 # MESS Web Client
 
 ## Overview
