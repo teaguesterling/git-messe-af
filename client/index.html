@@ -591,7 +591,9 @@
       view: 'loading',
       setupStep: 1,
       connectionTest: null,
-      showNewRequest: false
+      showNewRequest: false,
+      // Track recently modified threads to preserve during refresh
+      recentlyModified: new Map() // ref -> { folder, thread, expires }
     };
 
     function init() {
@@ -1638,7 +1640,44 @@
     async function refresh() {
       if (!state.github) return;
       state.loading = true; render();
-      try { state.threads = await state.github.listThreads(); } catch (e) { console.error('Refresh failed:', e); }
+      try {
+        const freshThreads = await state.github.listThreads();
+
+        // Preserve recently modified threads that may not be visible yet due to eventual consistency
+        const now = Date.now();
+        for (const [ref, entry] of state.recentlyModified) {
+          if (entry.expires < now) {
+            state.recentlyModified.delete(ref);
+            continue;
+          }
+
+          // Check if the thread is already in the expected folder
+          const inExpectedFolder = freshThreads[entry.folder].some(t => t.ref === ref);
+          if (inExpectedFolder) {
+            // GitHub caught up, remove from tracking
+            state.recentlyModified.delete(ref);
+            continue;
+          }
+
+          // Thread not in expected folder - check if it's elsewhere (stale)
+          const folders = ['received', 'executing', 'finished', 'canceled'];
+          let foundElsewhere = false;
+          for (const folder of folders) {
+            const idx = freshThreads[folder].findIndex(t => t.ref === ref);
+            if (idx !== -1) {
+              // Remove from stale location
+              freshThreads[folder].splice(idx, 1);
+              foundElsewhere = true;
+              break;
+            }
+          }
+
+          // Add optimistic version to expected folder
+          freshThreads[entry.folder].unshift(entry.thread);
+        }
+
+        state.threads = freshThreads;
+      } catch (e) { console.error('Refresh failed:', e); }
       state.loading = false; render();
     }
 
@@ -1664,6 +1703,13 @@
 
       // Add to new folder (at the beginning since it's most recently updated)
       state.threads[newFolder].unshift(updatedThread);
+
+      // Track this modification to preserve during refresh (10 second window)
+      state.recentlyModified.set(thread.ref, {
+        folder: newFolder,
+        thread: updatedThread,
+        expires: Date.now() + 10000
+      });
 
       return updatedThread;
     }
@@ -1710,7 +1756,14 @@
         // Update in place if staying in same folder
         const idx = state.threads[oldFolder].findIndex(t => t.ref === thread.ref);
         if (idx !== -1) {
-          state.threads[oldFolder][idx] = { ...thread, status: newStatus, updated: new Date().toISOString() };
+          const updatedThread = { ...thread, status: newStatus, updated: new Date().toISOString() };
+          state.threads[oldFolder][idx] = updatedThread;
+          // Track this modification to preserve during refresh
+          state.recentlyModified.set(thread.ref, {
+            folder: oldFolder,
+            thread: updatedThread,
+            expires: Date.now() + 10000
+          });
         }
       }
 
@@ -1723,6 +1776,8 @@
       } catch (e) {
         console.error(e);
         alert('Action failed: ' + e.message);
+        // Clear optimistic tracking so refresh gets actual state
+        state.recentlyModified.delete(thread.ref);
         // Revert optimistic update on failure - do a full refresh
         await refresh();
       }
