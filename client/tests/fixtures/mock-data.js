@@ -140,3 +140,34 @@ export function mockFileContent(envelope, messages, path) {
     encoding: 'base64'
   };
 }
+
+// ============ V2 Directory Format Helpers ============
+
+// Create a mock v2 directory listing
+export function mockV2DirectoryList(ref) {
+  return [
+    { name: `000-${ref}.messe-af.yaml`, type: 'file', sha: `sha-000-${ref}` }
+  ];
+}
+
+// Create a mock v2 file list response (for listFolder)
+export function mockV2FileList(threads) {
+  return threads.map(t => ({
+    name: t.ref,
+    path: `exchange/state=received/${t.ref}`,
+    sha: `sha-dir-${t.ref}`,
+    type: 'dir'
+  }));
+}
+
+// Create a mock v2 file content (for getFile inside directory)
+export function mockV2FileContent(envelope, messages, ref) {
+  const content = getThreadYaml(envelope, messages);
+  return {
+    name: `000-${ref}.messe-af.yaml`,
+    path: `exchange/state=received/${ref}/000-${ref}.messe-af.yaml`,
+    sha: `sha-000-${ref}`,
+    content: encodeContent(content),
+    encoding: 'base64'
+  };
+}

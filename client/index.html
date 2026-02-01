@@ -401,6 +401,32 @@
       }
     };
 
+    // ============ Size Limits (v2 format) ============
+    const MAX_FILE_SIZE = 1024 * 1024;        // 1 MB - GitHub Contents API limit
+    const MAX_INLINE_SIZE = 768 * 1024;       // 768 KB - inline attachment limit
+
+    // ============ Attachment Helpers ============
+    function getAttachmentType(mimeType) {
+      if (mimeType?.startsWith('image/')) return 'image';
+      if (mimeType?.startsWith('audio/')) return 'audio';
+      if (mimeType?.startsWith('video/')) return 'video';
+      return 'file';
+    }
+
+    function sanitizeFilename(name) {
+      return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_');
+    }
+
+    function getExtensionFromMime(mimeType) {
+      const mimeToExt = {
+        'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+        'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/mp4': 'm4a', 'audio/webm': 'webm',
+        'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
+        'application/pdf': 'pdf', 'text/plain': 'txt'
+      };
+      return mimeToExt[mimeType] || 'bin';
+    }
+
     // ============ GitHub API Client ============
     class GitHubExchange {
       constructor(owner, repo, token) {
@@ -446,7 +472,8 @@
       async listFolder(folder) {
         try {
           const data = await this.request(`/contents/exchange/state=${folder}`);
-          return data.filter(f => f.name.endsWith('.messe-af.yaml'));
+          // Return both v1 yaml files and v2 directories
+          return data.filter(f => f.name.endsWith('.messe-af.yaml') || f.type === 'dir');
         } catch (e) {
           if (e.message.includes('404')) return [];
           throw e;
@@ -467,6 +494,153 @@
 
       async deleteFile(path, sha, message) {
         return await this.request(`/contents/${path}`, { method: 'DELETE', body: JSON.stringify({ message, sha }) });
+      }
+
+      // Get directory contents (v2 format)
+      async getDirectory(dirPath) {
+        try {
+          const data = await this.request(`/contents/${dirPath}`);
+          if (!Array.isArray(data)) return null;
+          return data;
+        } catch (e) {
+          if (e.message.includes('404')) return null;
+          throw e;
+        }
+      }
+
+      // Create directory with files using Git Data API (atomic)
+      async createDirectory(dirPath, files, message) {
+        const refData = await this.request('/git/ref/heads/main');
+        const currentCommitSha = refData.object.sha;
+        const commitData = await this.request(`/git/commits/${currentCommitSha}`);
+        const baseTreeSha = commitData.tree.sha;
+
+        const treeEntries = files.map(f => ({
+          path: `${dirPath}/${f.name}`,
+          mode: '100644',
+          type: 'blob',
+          content: f.binary ? atob(f.content) : f.content
+        }));
+
+        const treeData = await this.request('/git/trees', {
+          method: 'POST',
+          body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
+        });
+
+        const newCommit = await this.request('/git/commits', {
+          method: 'POST',
+          body: JSON.stringify({ message, tree: treeData.sha, parents: [currentCommitSha] })
+        });
+
+        await this.request('/git/refs/heads/main', {
+          method: 'PATCH',
+          body: JSON.stringify({ sha: newCommit.sha })
+        });
+
+        return newCommit;
+      }
+
+      // Update files in a directory atomically
+      async updateDirectoryFiles(dirPath, updates, message, retries = 3) {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            const refData = await this.request('/git/ref/heads/main');
+            const currentCommitSha = refData.object.sha;
+            const commitData = await this.request(`/git/commits/${currentCommitSha}`);
+            const baseTreeSha = commitData.tree.sha;
+
+            const treeEntries = updates.map(u => ({
+              path: `${dirPath}/${u.name}`,
+              mode: '100644',
+              type: 'blob',
+              ...(u.sha === null ? { sha: null } : { content: u.binary ? atob(u.content) : u.content })
+            }));
+
+            const treeData = await this.request('/git/trees', {
+              method: 'POST',
+              body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
+            });
+
+            const newCommit = await this.request('/git/commits', {
+              method: 'POST',
+              body: JSON.stringify({ message, tree: treeData.sha, parents: [currentCommitSha] })
+            });
+
+            await this.request('/git/refs/heads/main', {
+              method: 'PATCH',
+              body: JSON.stringify({ sha: newCommit.sha })
+            });
+
+            return newCommit;
+          } catch (e) {
+            const isConflict = e.message.includes('fast forward') || e.message.includes('422');
+            if (isConflict && attempt < retries) {
+              await new Promise(r => setTimeout(r, 500 * attempt));
+              continue;
+            }
+            throw e;
+          }
+        }
+      }
+
+      // Move directory atomically using Git Data API
+      async moveDirectory(oldDirPath, newDirPath, message, retries = 3) {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            const refData = await this.request('/git/ref/heads/main');
+            const currentCommitSha = refData.object.sha;
+            const commitData = await this.request(`/git/commits/${currentCommitSha}`);
+            const baseTreeSha = commitData.tree.sha;
+
+            const oldFiles = await this.getDirectory(oldDirPath);
+            if (!oldFiles) throw new Error(`Directory not found: ${oldDirPath}`);
+
+            const treeEntries = [];
+            for (const file of oldFiles) {
+              // Delete from old location
+              treeEntries.push({
+                path: `${oldDirPath}/${file.name}`,
+                mode: '100644',
+                type: 'blob',
+                sha: null
+              });
+              // Get content and create at new location
+              const fileContent = await this.getFile(`${oldDirPath}/${file.name}`);
+              if (fileContent) {
+                treeEntries.push({
+                  path: `${newDirPath}/${file.name}`,
+                  mode: '100644',
+                  type: 'blob',
+                  content: fileContent.content
+                });
+              }
+            }
+
+            const treeData = await this.request('/git/trees', {
+              method: 'POST',
+              body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
+            });
+
+            const newCommit = await this.request('/git/commits', {
+              method: 'POST',
+              body: JSON.stringify({ message, tree: treeData.sha, parents: [currentCommitSha] })
+            });
+
+            await this.request('/git/refs/heads/main', {
+              method: 'PATCH',
+              body: JSON.stringify({ sha: newCommit.sha })
+            });
+
+            return newCommit;
+          } catch (e) {
+            const isConflict = e.message.includes('fast forward') || e.message.includes('422');
+            if (isConflict && attempt < retries) {
+              await new Promise(r => setTimeout(r, 500 * attempt));
+              continue;
+            }
+            throw e;
+          }
+        }
       }
 
       // Atomic move: delete old path + create new path in single commit
@@ -523,11 +697,76 @@
         }
       }
 
-      async getThread(folder, filename) {
-        const path = `exchange/state=${folder}/${filename}`;
-        const { content, sha } = await this.getFile(path);
+      // Parse thread from v2 directory format
+      parseThread(files) {
+        const yamlFiles = files
+          .filter(f => f.name.endsWith('.messe-af.yaml'))
+          .sort((a, b) => {
+            const numA = parseInt(a.name.split('-')[0]);
+            const numB = parseInt(b.name.split('-')[0]);
+            return numA - numB;
+          });
+
+        if (yamlFiles.length === 0) throw new Error('No YAML files in thread directory');
+
+        const firstDocs = yamlFiles[0].content.split(/^---$/m).filter(d => d.trim()).map(d => jsyaml.load(d));
+        const envelope = firstDocs[0];
+        const messages = firstDocs.slice(1);
+
+        for (let i = 1; i < yamlFiles.length; i++) {
+          const docs = yamlFiles[i].content.split(/^---$/m).filter(d => d.trim()).map(d => jsyaml.load(d));
+          messages.push(...docs);
+        }
+
+        const attachments = files.filter(f => f.name.startsWith('att-')).map(f => ({ name: f.name, sha: f.sha }));
+        return { envelope, messages, attachments };
+      }
+
+      // Parse thread from v1 flat file format
+      parseThreadV1(content) {
         const docs = content.split(/^---$/m).filter(d => d.trim()).map(d => jsyaml.load(d));
-        return { envelope: docs[0], messages: docs.slice(1), _path: path, _sha: sha };
+        return { envelope: docs[0], messages: docs.slice(1), attachments: [] };
+      }
+
+      // Get thread - handles both v1 and v2 formats
+      async getThread(folder, entryName) {
+        const isDirectory = !entryName.endsWith('.messe-af.yaml');
+
+        if (isDirectory) {
+          // V2 directory format
+          const dirPath = `exchange/state=${folder}/${entryName}`;
+          const dirContents = await this.getDirectory(dirPath);
+          if (!dirContents) throw new Error('Directory not found');
+
+          const files = [];
+          for (const entry of dirContents) {
+            if (entry.type === 'file') {
+              const fileData = await this.getFile(`${dirPath}/${entry.name}`);
+              if (fileData) {
+                files.push({ name: entry.name, content: fileData.content, sha: fileData.sha });
+              }
+            }
+          }
+
+          const parsed = this.parseThread(files);
+          return {
+            ...parsed,
+            _path: dirPath,
+            _files: files,
+            _format: 'v2'
+          };
+        } else {
+          // V1 flat file format
+          const path = `exchange/state=${folder}/${entryName}`;
+          const { content, sha } = await this.getFile(path);
+          const parsed = this.parseThreadV1(content);
+          return {
+            ...parsed,
+            _path: path,
+            _sha: sha,
+            _format: 'v1'
+          };
+        }
       }
 
       async listThreads() {
@@ -535,19 +774,21 @@
         const results = { received: [], executing: [], finished: [], canceled: [] };
 
         for (const folder of folders) {
-          const files = await this.listFolder(folder);
-          for (const file of files) {
+          const entries = await this.listFolder(folder);
+          for (const entry of entries) {
             try {
-              const thread = await this.getThread(folder, file.name);
-              // Keep envelope nested for updateThread, but also spread for easy access in UI
+              const thread = await this.getThread(folder, entry.name);
               results[folder].push({
                 ...thread.envelope,
                 envelope: thread.envelope,
                 messages: thread.messages,
+                attachments: thread.attachments,
                 _path: thread._path,
-                _sha: thread._sha
+                _sha: thread._sha,
+                _files: thread._files,
+                _format: thread._format
               });
-            } catch (e) { console.error(`Failed to load ${file.name}:`, e); }
+            } catch (e) { console.error(`Failed to load ${entry.name}:`, e); }
           }
         }
 
@@ -557,16 +798,115 @@
         return results;
       }
 
-      serializeThread(envelope, messages) {
-        return [envelope, ...messages].map(d => jsyaml.dump(d, { lineWidth: -1 })).join('---\n');
+      // Serialize thread - returns array of files for v2 directory format
+      serializeThread(envelope, messages, attachments = []) {
+        const files = [];
+
+        // Calculate next attachment serial
+        let nextSerial = 1;
+        for (const att of attachments) {
+          const match = att.name.match(/^att-(\d+)-/);
+          if (match) {
+            const serial = parseInt(match[1]);
+            if (serial >= nextSerial) nextSerial = serial + 1;
+          }
+        }
+
+        // Start with envelope in file 000
+        let currentFileNum = 0;
+        let currentDocs = [envelope];
+        let currentSize = new Blob([jsyaml.dump(envelope, { lineWidth: -1 })]).size;
+
+        for (const msg of messages) {
+          // Process attachments in message
+          const processed = this.processMessageAttachments(msg, attachments, nextSerial);
+          if (processed.newAttachments) {
+            for (const att of processed.newAttachments) {
+              attachments.push(att);
+              nextSerial++;
+            }
+          }
+
+          const msgYaml = jsyaml.dump(processed.message, { lineWidth: -1 });
+          const msgSize = new Blob([msgYaml]).size;
+
+          // Would adding this message exceed the limit?
+          if (currentSize + msgSize + 4 > MAX_FILE_SIZE && currentDocs.length > 1) {
+            files.push({
+              name: `${currentFileNum.toString().padStart(3, '0')}-${envelope.ref}.messe-af.yaml`,
+              content: currentDocs.map(d => jsyaml.dump(d, { lineWidth: -1 })).join('---\n')
+            });
+            currentFileNum++;
+            currentDocs = [];
+            currentSize = 0;
+          }
+
+          currentDocs.push(processed.message);
+          currentSize += msgSize + 4;
+        }
+
+        // Save final file
+        if (currentDocs.length > 0) {
+          files.push({
+            name: `${currentFileNum.toString().padStart(3, '0')}-${envelope.ref}.messe-af.yaml`,
+            content: currentDocs.map(d => jsyaml.dump(d, { lineWidth: -1 })).join('---\n')
+          });
+        }
+
+        // Add attachment files
+        for (const att of attachments) {
+          if (att.content) {
+            files.push({ name: att.name, content: att.content, binary: att.binary });
+          }
+        }
+
+        return files;
+      }
+
+      // Process message to externalize large attachments
+      processMessageAttachments(msg, existingAttachments, startSerial) {
+        const newAttachments = [];
+        let serial = startSerial;
+        const processedMsg = JSON.parse(JSON.stringify(msg));
+
+        if (processedMsg.MESS) {
+          for (const item of processedMsg.MESS) {
+            if (item.response?.content) {
+              item.response.content = item.response.content.map(c => {
+                if (typeof c === 'object' && c.image) {
+                  const dataUrl = c.image;
+                  const size = new Blob([dataUrl]).size;
+
+                  if (size > MAX_INLINE_SIZE) {
+                    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+                    if (match) {
+                      const [, mime, base64Data] = match;
+                      const type = getAttachmentType(mime);
+                      const ext = getExtensionFromMime(mime);
+                      const attName = `att-${serial.toString().padStart(3, '0')}-${type}-image.${ext}`;
+
+                      newAttachments.push({ name: attName, content: base64Data, binary: true });
+                      serial++;
+
+                      return { file: { path: attName, name: `image.${ext}`, mime } };
+                    }
+                  }
+                }
+                return c;
+              });
+            }
+          }
+        }
+
+        return { message: processedMsg, newAttachments };
       }
 
       async createRequest(from, request) {
         const today = new Date().toISOString().split('T')[0];
         const existing = await this.listFolder('received');
-        const todayFiles = existing.filter(f => f.name.startsWith(today));
-        const ref = `${today}-${(todayFiles.length + 1).toString().padStart(3, '0')}`;
-        
+        const todayEntries = existing.filter(e => e.name.startsWith(today));
+        const ref = `${today}-${(todayEntries.length + 1).toString().padStart(3, '0')}`;
+
         const now = new Date().toISOString();
         const envelope = {
           ref, requestor: from, executor: null, status: 'pending',
@@ -574,13 +914,17 @@
           priority: request.priority || 'normal',
           history: [{ action: 'created', at: now, by: from }]
         };
-        
+
         const messages = [
           { from, received: now, channel: 'github', MESS: [{ v: '1.0.0' }, { request }] },
           { from: 'exchange', received: now, MESS: [{ ack: { re: 'last', ref } }] }
         ];
-        
-        await this.putFile(`exchange/state=received/${ref}.messe-af.yaml`, this.serializeThread(envelope, messages), `New request: ${request.intent}`);
+
+        // V2: Create directory with files
+        const files = this.serializeThread(envelope, messages);
+        const dirPath = `exchange/state=received/${ref}`;
+        await this.createDirectory(dirPath, files, `${ref}: New request`);
+
         return { ref, status: 'pending' };
       }
 
@@ -588,7 +932,8 @@
         const now = new Date().toISOString();
         const envelope = { ...thread.envelope };
         const messages = [...thread.messages, { from, received: now, channel: 'github', MESS: mess }];
-        
+        const attachments = [...(thread.attachments || [])];
+
         const oldFolder = this.getFolder(envelope.status);
         if (newStatus && newStatus !== envelope.status) {
           envelope.status = newStatus;
@@ -597,17 +942,67 @@
           envelope.history.push({ action: newStatus, at: now, by: from });
           if (newStatus === 'claimed') envelope.executor = from;
         }
-        
-        const content = this.serializeThread(envelope, messages);
-        const newFolder = this.getFolder(envelope.status);
 
-        if (newFolder !== oldFolder) {
-          // Atomic move: delete old + create new in single commit
-          const newPath = `exchange/state=${newFolder}/${envelope.ref}.messe-af.yaml`;
-          await this.moveFile(thread._path, newPath, content, `${newStatus}: ${envelope.intent}`);
-        } else {
-          await this.putFile(thread._path, content, `Update: ${envelope.intent}`, thread._sha);
+        const newFolder = this.getFolder(envelope.status);
+        const files = this.serializeThread(envelope, messages, attachments);
+
+        // Handle v1 format - upgrade to v2 on modification
+        if (thread._format === 'v1') {
+          const newDirPath = `exchange/state=${newFolder}/${envelope.ref}`;
+
+          // Use Git Data API to create directory and delete old file atomically
+          const refData = await this.request('/git/ref/heads/main');
+          const currentCommitSha = refData.object.sha;
+          const commitData = await this.request(`/git/commits/${currentCommitSha}`);
+          const baseTreeSha = commitData.tree.sha;
+
+          const treeEntries = [
+            // Delete old v1 file
+            { path: thread._path, mode: '100644', type: 'blob', sha: null },
+            // Create new v2 files
+            ...files.map(f => ({
+              path: `${newDirPath}/${f.name}`,
+              mode: '100644',
+              type: 'blob',
+              content: f.binary ? atob(f.content) : f.content
+            }))
+          ];
+
+          const treeData = await this.request('/git/trees', {
+            method: 'POST',
+            body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
+          });
+
+          const newCommit = await this.request('/git/commits', {
+            method: 'POST',
+            body: JSON.stringify({
+              message: `${envelope.ref}: ${newStatus || 'Update'} (upgraded to v2)`,
+              tree: treeData.sha,
+              parents: [currentCommitSha]
+            })
+          });
+
+          await this.request('/git/refs/heads/main', {
+            method: 'PATCH',
+            body: JSON.stringify({ sha: newCommit.sha })
+          });
+
+          return envelope;
         }
+
+        // Handle v2 format
+        if (newFolder !== oldFolder) {
+          // Move directory
+          const newDirPath = `exchange/state=${newFolder}/${envelope.ref}`;
+
+          // First update files, then move
+          await this.updateDirectoryFiles(thread._path, files, `Update: ${envelope.intent}`);
+          await this.moveDirectory(thread._path, newDirPath, `${newStatus}: ${envelope.intent}`);
+        } else {
+          // Just update files in place
+          await this.updateDirectoryFiles(thread._path, files, `Update: ${envelope.intent}`);
+        }
+
         return envelope;
       }
 
