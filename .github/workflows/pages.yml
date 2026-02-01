@@ -23,6 +23,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Only auto-deploy on push if ENABLE_PAGES_DEPLOY variable is set to 'true'
+    # Template repos won't have this variable, preventing unwanted deployments
+    # Manual workflow_dispatch always runs regardless of this setting
+    if: github.event_name == 'workflow_dispatch' || vars.ENABLE_PAGES_DEPLOY == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
