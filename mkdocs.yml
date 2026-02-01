@@ -1,6 +1,6 @@
 site_name: MESS - Meatspace Execution and Submission System
 site_description: Dispatch physical-world tasks from AI agents to human executors using GitHub as the backend
-site_url: https://mess.readthedocs.io
+site_url: https://git-messe-af.readthedocs.io/en/latest/
 
 repo_name: git-messe-af
 repo_url: https://github.com/teaguesterling/git-messe-af

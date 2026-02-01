@@ -4,7 +4,7 @@
 
 Dispatch physical-world tasks from AI agents to human executors using GitHub as the backend.
 
-**[Try the Client](https://teaguesterling.github.io/git-messe-af/)** | [Documentation](https://mess.readthedocs.io)
+**[Try the Client](https://teaguesterling.github.io/git-messe-af/)** | [Documentation](https://git-messe-af.readthedocs.io/en/latest/)
 
 ## Architecture
 
