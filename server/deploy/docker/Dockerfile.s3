@@ -1,0 +1,24 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies including S3 SDK
+RUN npm install --omit=dev && npm install @aws-sdk/client-s3
+
+# Copy source
+COPY src/ ./src/
+
+# Set defaults for S3
+ENV PORT=3000
+ENV STORAGE_TYPE=s3
+
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+CMD ["node", "src/adapters/express.js"]

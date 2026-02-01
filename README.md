@@ -306,17 +306,64 @@ Just open `client/index.html` in your browser — it works offline once configur
 
 ---
 
-## Self-Hosting Without GitHub
+## Self-Hosting Options
 
-For a completely local setup (no cloud services required):
+MESS supports multiple deployment modes depending on your needs:
 
-### 1. Create local directories
+### Option 1: GitHub Backend (Simplest)
+
+Use GitHub as your backend — this is the default approach described above. No server to host, works with the static web client.
+
+### Option 2: Exchange Server (Multi-User / Scalable)
+
+For teams, advanced deployments, or when you don't want to use GitHub, deploy the Exchange Server:
+
+```
+server/
+├── src/
+│   ├── core.js              # Shared business logic
+│   ├── storage/             # Filesystem, S3, or R2 backends
+│   └── adapters/            # Express.js or Cloudflare Workers
+└── deploy/
+    ├── docker/              # Docker Compose
+    ├── helm/                # Kubernetes Helm chart
+    └── cloudflare/          # Wrangler config
+```
+
+**Docker (quickest self-hosted):**
+
+```bash
+cd server
+docker compose -f deploy/docker/docker-compose.yml up -d
+```
+
+**Kubernetes:**
+
+```bash
+helm install mess-exchange server/deploy/helm \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host=mess.yourdomain.com
+```
+
+**Cloudflare Workers + R2:**
+
+```bash
+cd server
+wrangler r2 bucket create mess-exchange
+npm run worker:deploy
+```
+
+See [`server/README.md`](server/README.md) for full API reference, storage options, and deployment details.
+
+### Option 3: Local Files Only (Offline)
+
+For a completely local setup (no network required):
 
 ```bash
 mkdir -p ~/.mess/{received,executing,finished,canceled}
 ```
 
-### 2. Configure Claude for local mode
+Configure Claude for local mode:
 
 ```json
 {
@@ -333,16 +380,13 @@ mkdir -p ~/.mess/{received,executing,finished,canceled}
 }
 ```
 
-### 3. Respond to requests manually
+Without GitHub or the Exchange Server, the web client won't work. Manage tasks via filesystem:
 
-Without GitHub, the web client won't work. Instead:
+- View pending: `ls ~/.mess/received/`
+- Read task: `cat ~/.mess/received/2026-02-01-001.messe-af.yaml`
+- Claim: `mv ~/.mess/received/2026-02-01-001.messe-af.yaml ~/.mess/executing/`
 
-- View pending tasks: `ls ~/.mess/received/`
-- Read a task: `cat ~/.mess/received/2026-02-01-001.messe-af.yaml`
-- Move to executing: `mv ~/.mess/received/2026-02-01-001.messe-af.yaml ~/.mess/executing/`
-- Edit to add response and move to finished when complete
-
-See [`mcp/README.md`](mcp/README.md) for the full local file format and more details.
+See [`mcp/README.md`](mcp/README.md) for the full file format.
 
 ---
 

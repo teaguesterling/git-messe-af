@@ -1,0 +1,22 @@
+name = "mess-exchange"
+main = "../../src/adapters/worker.js"
+compatibility_date = "2024-01-01"
+
+# R2 bucket binding
+[[r2_buckets]]
+binding = "MESS_BUCKET"
+bucket_name = "mess-exchange"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Development environment
+[env.dev]
+name = "mess-exchange-dev"
+
+[env.dev.vars]
+ENVIRONMENT = "development"
+
+[[env.dev.r2_buckets]]
+binding = "MESS_BUCKET"
+bucket_name = "mess-exchange-dev"

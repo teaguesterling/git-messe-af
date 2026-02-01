@@ -1,0 +1,13 @@
+apiVersion: v2
+name: mess-exchange
+description: MESS Exchange Server - Meatspace Exchange for Synchronous Services
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - mess
+  - exchange
+  - ai-agents
+  - human-in-the-loop
+maintainers:
+  - name: Teague Sterling

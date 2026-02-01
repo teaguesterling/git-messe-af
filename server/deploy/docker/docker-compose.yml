@@ -1,0 +1,104 @@
+# MESS Exchange Server - Docker Compose
+#
+# Deployment modes:
+#   Filesystem (default):  docker compose up -d mess-exchange
+#   With MinIO (S3):       docker compose --profile minio up -d
+#
+# Register an executor:
+#   curl -X POST http://localhost:3000/api/v1/exchanges/home/register \
+#     -H "Content-Type: application/json" \
+#     -d '{"executor_id": "my-phone", "display_name": "My Phone"}'
+
+services:
+  # ============ Filesystem Mode (Default) ============
+  mess-exchange:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: mess-exchange:latest
+    container_name: mess-exchange
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - STORAGE_TYPE=filesystem
+      - STORAGE_PATH=/data
+    volumes:
+      - mess-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============ MinIO Mode ============
+  
+  # MinIO S3-compatible storage
+  minio:
+    image: minio/minio:latest
+    container_name: mess-minio
+    profiles:
+      - minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MinIO bucket setup
+  minio-setup:
+    image: minio/mc:latest
+    profiles:
+      - minio
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      mc mb myminio/mess-exchange --ignore-existing;
+      echo 'Bucket mess-exchange created!'
+      "
+
+  # MESS Exchange with MinIO backend
+  mess-exchange-s3:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.s3
+    image: mess-exchange:s3
+    container_name: mess-exchange-s3
+    profiles:
+      - minio
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - STORAGE_TYPE=s3
+      - S3_ENDPOINT=http://minio:9000
+      - S3_BUCKET=mess-exchange
+      - S3_ACCESS_KEY=minioadmin
+      - S3_SECRET_KEY=minioadmin
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+
+volumes:
+  mess-data:
+    name: mess-exchange-data
+  minio-data:
+    name: mess-minio-data
