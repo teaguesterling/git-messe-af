@@ -3,8 +3,12 @@ name: MESS Notifications
 on:
   push:
     paths:
+      # V1: flat yaml files
       - 'exchange/state=received/*.yaml'
       - 'exchange/state=received/*.yml'
+      # V2: directory-based threads
+      - 'exchange/state=received/**/*.yaml'
+      - 'exchange/state=received/**/*.yml'
   workflow_dispatch:
     inputs:
       test_mode:
@@ -439,24 +443,45 @@ jobs:
           // ============ Main Logic ============
 
           async function main() {
-            // Find new request files
+            // Find new request files/directories
             const { execSync } = require('child_process');
             let newFiles = [];
-            
+            let newDirs = new Set();
+
             try {
               const diff = execSync('git diff --name-only --diff-filter=A HEAD~1 HEAD -- "exchange/state=received/"', { encoding: 'utf-8' });
-              newFiles = diff.trim().split('\n').filter(f => f && (f.endsWith('.yaml') || f.endsWith('.yml')));
+              const allNew = diff.trim().split('\n').filter(f => f);
+
+              for (const file of allNew) {
+                // Check if this is a v2 directory structure (file inside a directory)
+                const parts = file.replace('exchange/state=received/', '').split('/');
+                if (parts.length > 1) {
+                  // V2: file is inside a thread directory
+                  const dirName = parts[0];
+                  if (!newDirs.has(dirName)) {
+                    newDirs.add(dirName);
+                    // Find the primary yaml file (000-*.messe-af.yaml)
+                    const primaryFile = `exchange/state=received/${dirName}/000-${dirName}.messe-af.yaml`;
+                    if (fs.existsSync(primaryFile)) {
+                      newFiles.push(primaryFile);
+                    }
+                  }
+                } else if (file.endsWith('.yaml') || file.endsWith('.yml')) {
+                  // V1: flat yaml file
+                  newFiles.push(file);
+                }
+              }
             } catch (e) {
               console.log('No previous commit or no new files');
               return;
             }
-            
+
             if (newFiles.length === 0) {
               console.log('No new request files');
               return;
             }
-            
-            console.log(`Found ${newFiles.length} new request(s)`);
+
+            console.log(`Found ${newFiles.length} new request(s) (${newDirs.size} v2 directories)`);
             
             // Load all executor configs
             const executorsDir = 'executors';

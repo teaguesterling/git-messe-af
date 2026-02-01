@@ -770,4 +770,146 @@ The MESSE-AF format is essentially **MESS messages + email-style threading metad
 
 ---
 
-*MESSE-AF v1.0.0 — Ready for implementation*
+---
+
+## V2: Directory-Based Thread Storage
+
+**Version:** 2.0.0
+**Date:** 2026-02-01
+
+### Overview
+
+V2 extends the file format to use directories instead of flat files, enabling:
+- External attachments (no inline base64 bloat)
+- Thread file overflow for long conversations
+- Easy archiving as zip files
+- Compatibility with GitHub's API limits (1MB per file)
+
+V2 is backward-compatible: readers should detect and handle both v1 flat files and v2 directories.
+
+### Directory Structure
+
+```
+exchange/
+  state=received/
+    2026-02-01-001/                         # Thread directory
+      000-2026-02-01-001.messe-af.yaml      # Primary thread file
+      001-2026-02-01-001.messe-af.yaml      # Overflow (if needed)
+      att-001-image-IMG_0001.jpg            # External attachment
+      att-002-file-assembly_instructions.pdf
+    2026-02-01-002/
+      000-2026-02-01-002.messe-af.yaml
+  state=executing/
+    ...
+```
+
+### Size Limits
+
+| Limit | Value | Rationale |
+|-------|-------|-----------|
+| Thread file | 1 MB | GitHub Contents API limit |
+| Inline attachment | 768 KB | 0.75 MB (3 × 2⁸ KB), leaves ~256KB for envelope + messages |
+| Image compression | 500 KB target | Applied before embedding |
+| External attachment | No limit | Stored as separate files |
+
+**Note:** Images are compressed to ~500KB target. If still over 768KB after compression, they're stored externally.
+
+### File Numbering
+
+- Primary file: `000-{ref}.messe-af.yaml`
+- Overflow files: `001-{ref}.messe-af.yaml`, `002-{ref}.messe-af.yaml`, etc.
+- Envelope lives in `000-*` only
+- Messages append to highest-numbered file until it exceeds limit
+- Reading a thread: concatenate all numbered files in order
+
+### Attachment References
+
+**File naming convention:**
+```
+att-{serial}-{type}-{original_name_sanitized}.{ext}
+```
+
+Examples:
+- `att-001-image-IMG_0001.jpg`
+- `att-002-file-assembly_instructions.pdf`
+- `att-003-image-photo.png`
+
+**Type prefixes:**
+- `image` - jpg, png, gif, webp
+- `audio` - mp3, wav, m4a
+- `video` - mp4, mov, webm
+- `file` - pdf, doc, txt, etc.
+
+**In YAML (relative paths with original name preserved):**
+```yaml
+content:
+  - file:
+      path: att-001-image-IMG_0001.jpg    # Relative to thread directory
+      name: IMG_0001.jpg                   # Original filename
+      mime: image/jpeg
+  - file:
+      path: att-002-file-assembly_instructions.pdf
+      name: Assembly Instructions.pdf
+      mime: application/pdf
+  - Small inline text stays inline
+  - image: data:image/png;base64,...  # Images under 768KB can stay inline
+```
+
+### Reading a Thread
+
+1. Check if `{ref}` is a directory or file
+2. If directory:
+   - Read all `{nnn}-{ref}.messe-af.yaml` files in numeric order
+   - First file contains envelope as document 1
+   - Concatenate all message documents from all files
+   - Resolve `file:` references relative to thread directory
+3. If file (v1 format):
+   - Read as before
+
+### Writing a Thread
+
+**Create new thread:**
+1. Create directory `state=received/{ref}/`
+2. Write `000-{ref}.messe-af.yaml` with envelope + initial messages
+
+**Append message:**
+1. Find highest-numbered `{nnn}-{ref}.messe-af.yaml`
+2. If adding message would exceed 1MB:
+   - Create next file `{nnn+1}-{ref}.messe-af.yaml`
+   - Write message there (no envelope in overflow files)
+3. Otherwise append to current file
+
+**Add attachment:**
+1. Determine attachment serial (next available across all files)
+2. Determine type prefix based on mime type
+3. Sanitize original filename (remove spaces, special chars)
+4. Write to `att-{serial}-{type}-{sanitized}.{ext}`
+5. Reference in YAML with `file:` block
+
+### Archive Format
+
+Zip the directory for transport/backup:
+```
+2026-02-01-001.messe-af.zip
+  └── 2026-02-01-001/
+      ├── 000-2026-02-01-001.messe-af.yaml
+      ├── 001-2026-02-01-001.messe-af.yaml
+      └── att-001-image-IMG_0001.jpg
+```
+
+### Moving Threads (Status Changes)
+
+When status changes require moving to a different folder:
+1. Move the entire directory atomically
+2. With GitHub Git Data API: create new tree with directory in new location, delete from old
+
+### Backward Compatibility
+
+- Readers must support both v1 (flat files) and v2 (directories)
+- Detection: check if `{ref}` path is a directory or file
+- New threads should use v2 format
+- V1 threads can remain as-is until modified (optional migration)
+
+---
+
+*MESSE-AF v2.0.0 — Directory-based storage format*
