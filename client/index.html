@@ -425,17 +425,24 @@
       async listThreads() {
         const folders = ['received', 'executing', 'finished', 'canceled'];
         const results = { received: [], executing: [], finished: [], canceled: [] };
-        
+
         for (const folder of folders) {
           const files = await this.listFolder(folder);
           for (const file of files) {
             try {
               const thread = await this.getThread(folder, file.name);
-              results[folder].push({ ...thread.envelope, messages: thread.messages, _path: thread._path, _sha: thread._sha });
+              // Keep envelope nested for updateThread, but also spread for easy access in UI
+              results[folder].push({
+                ...thread.envelope,
+                envelope: thread.envelope,
+                messages: thread.messages,
+                _path: thread._path,
+                _sha: thread._sha
+              });
             } catch (e) { console.error(`Failed to load ${file.name}:`, e); }
           }
         }
-        
+
         for (const folder of folders) {
           results[folder].sort((a, b) => new Date(b.updated) - new Date(a.updated));
         }
