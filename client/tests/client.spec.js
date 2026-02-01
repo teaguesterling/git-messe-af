@@ -86,6 +86,32 @@ async function setupGitHubMocks(page, options = {}) {
       return route.fulfill({ json: { commit: { sha: 'delete-commit-sha' } } });
     }
 
+    // Git Data API - for atomic moveFile operations
+    // Get branch ref
+    if (url.match(/\/git\/ref\/heads\/main$/) && method === 'GET') {
+      return route.fulfill({ json: { object: { sha: 'current-commit-sha' } } });
+    }
+
+    // Get commit (for tree sha)
+    if (url.match(/\/git\/commits\/[^/]+$/) && method === 'GET') {
+      return route.fulfill({ json: { tree: { sha: 'current-tree-sha' } } });
+    }
+
+    // Create tree
+    if (url.match(/\/git\/trees$/) && method === 'POST') {
+      return route.fulfill({ json: { sha: 'new-tree-sha' } });
+    }
+
+    // Create commit
+    if (url.match(/\/git\/commits$/) && method === 'POST') {
+      return route.fulfill({ json: { sha: 'new-commit-sha' } });
+    }
+
+    // Update ref
+    if (url.match(/\/git\/refs\/heads\/main$/) && method === 'PATCH') {
+      return route.fulfill({ json: { object: { sha: 'new-commit-sha' } } });
+    }
+
     // Executor registration - GET (check if exists) and PUT
     if (url.includes('/contents/executors/') && method === 'GET') {
       return route.fulfill({ status: 404, json: { message: '404 Not Found' } });
@@ -232,17 +258,16 @@ test.describe('Thread Actions', () => {
     let claimCalled = false;
     await setupGitHubMocks(page);
 
-    // Override PUT to track claim
-    await page.route('https://api.github.com/repos/**/contents/exchange/**', async (route, request) => {
-      if (request.method() === 'PUT') {
+    // Override git/trees POST to track claim (atomic move sends content here)
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
         const body = JSON.parse(request.postData());
-        const content = Buffer.from(body.content, 'base64').toString('utf-8');
-        if (content.includes('status: claimed')) {
+        // Content is in tree[1].content (tree[0] is the delete)
+        const content = body.tree?.find(t => t.content)?.content;
+        if (content && content.includes('status: claimed')) {
           claimCalled = true;
         }
-        return route.fulfill({
-          json: { content: { sha: 'new-sha' }, commit: { sha: 'commit' } }
-        });
+        return route.fulfill({ json: { sha: 'new-tree-sha' } });
       }
       return route.fallback();
     });
@@ -264,16 +289,15 @@ test.describe('Thread Actions', () => {
     let claimCalled = false;
     await setupGitHubMocks(page);
 
-    await page.route('https://api.github.com/repos/**/contents/exchange/**', async (route, request) => {
-      if (request.method() === 'PUT') {
+    // Override git/trees POST to track claim (atomic move sends content here)
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
         const body = JSON.parse(request.postData());
-        const content = Buffer.from(body.content, 'base64').toString('utf-8');
-        if (content.includes('status: claimed')) {
+        const content = body.tree?.find(t => t.content)?.content;
+        if (content && content.includes('status: claimed')) {
           claimCalled = true;
         }
-        return route.fulfill({
-          json: { content: { sha: 'new-sha' }, commit: { sha: 'commit' } }
-        });
+        return route.fulfill({ json: { sha: 'new-tree-sha' } });
       }
       return route.fallback();
     });
@@ -599,15 +623,16 @@ test.describe('Photo Capture', () => {
       }
     });
 
-    // Override PUT to capture response content
-    await page.route('https://api.github.com/repos/**/contents/exchange/**', async (route, request) => {
-      if (request.method() === 'PUT') {
+    // Override git/trees POST to capture response content (atomic move sends content here)
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
         const body = JSON.parse(request.postData());
-        const content = Buffer.from(body.content, 'base64').toString('utf-8');
-        responseContent = content;
-        return route.fulfill({
-          json: { content: { sha: 'new-sha' }, commit: { sha: 'commit' } }
-        });
+        // Content is in tree[1].content (tree[0] is the delete)
+        const content = body.tree?.find(t => t.content)?.content;
+        if (content) {
+          responseContent = content;
+        }
+        return route.fulfill({ json: { sha: 'new-tree-sha' } });
       }
       return route.fallback();
     });
