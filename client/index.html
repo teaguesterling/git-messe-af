@@ -1588,22 +1588,24 @@
     }
 
     async function handleAction(action, refOverride = null) {
-      const thread = refOverride 
+      const thread = refOverride
         ? state.threads[state.currentFolder].find(t => t.ref === refOverride)
         : state.selectedThread;
       if (!thread) return;
-      
+
+      // Capture form values BEFORE render() replaces the DOM
+      const responseText = document.getElementById('response-text')?.value;
+      const photoImg = document.getElementById('photo-img')?.src;
+
       state.loading = true; render();
-      
+
       try {
         let mess = [], newStatus = null;
         const ref = thread.ref;
-        
+
         if (action === 'claim') { mess = [{ status: { re: ref, code: 'claimed' } }]; newStatus = 'claimed'; }
         else if (action === 'complete') {
           mess = [{ status: { re: ref, code: 'completed' } }];
-          const responseText = document.getElementById('response-text')?.value;
-          const photoImg = document.getElementById('photo-img')?.src;
           const content = [];
           if (photoImg && !photoImg.startsWith('about:')) content.push({ image: photoImg });
           if (responseText) content.push(responseText);

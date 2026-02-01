@@ -1,0 +1,16 @@
+{
+  "name": "mess-client",
+  "version": "1.0.0",
+  "description": "MESS Client - Web interface for human executors",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "serve": "^14.2.0"
+  }
+}
