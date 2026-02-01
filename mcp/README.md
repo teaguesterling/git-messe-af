@@ -1,0 +1,246 @@
+# MESS MCP Server
+
+An MCP (Model Context Protocol) server that enables AI agents like Claude to dispatch physical-world tasks to human executors.
+
+## Features
+
+- **GitHub sync**: Tasks sync to/from your GitHub repository
+- **Local mode**: Store tasks locally without GitHub
+- **Hybrid mode**: Local storage with GitHub backup
+- Two tools: `mess` (create/update requests) and `mess_status` (check status)
+
+## Installation
+
+```bash
+cd mcp
+npm install
+```
+
+## Configuration
+
+The server supports three modes via environment variables:
+
+### Mode 1: GitHub Only (Recommended for sharing)
+
+All tasks stored in GitHub. Best when multiple executors/agents share the same exchange.
+
+```bash
+MESS_GITHUB_REPO=your-username/mess-exchange
+MESS_GITHUB_TOKEN=github_pat_xxxxx
+MESS_GITHUB_ONLY=true
+MESS_AGENT_ID=claude-desktop
+```
+
+### Mode 2: GitHub Sync (Hybrid)
+
+Tasks stored locally AND synced to GitHub. Good for offline capability with cloud backup.
+
+```bash
+MESS_GITHUB_REPO=your-username/mess-exchange
+MESS_GITHUB_TOKEN=github_pat_xxxxx
+MESS_DIR=~/.mess
+MESS_AGENT_ID=claude-desktop
+```
+
+### Mode 3: Local Only
+
+Tasks stored only on local filesystem. Good for single-machine use or testing.
+
+```bash
+MESS_DIR=~/.mess
+MESS_AGENT_ID=claude-desktop
+```
+
+## Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `MESS_GITHUB_REPO` | No | - | GitHub repo in `owner/name` format |
+| `MESS_GITHUB_TOKEN` | If using GitHub | - | GitHub Personal Access Token |
+| `MESS_GITHUB_ONLY` | No | `false` | Set `true` to disable local storage |
+| `MESS_DIR` | No | `~/.mess` | Local directory for task files |
+| `MESS_AGENT_ID` | No | `claude-agent` | Identifier for this agent |
+
+## Setting up with Claude Desktop
+
+### macOS
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mess": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp/index.js"],
+      "env": {
+        "MESS_GITHUB_REPO": "your-username/mess-exchange",
+        "MESS_GITHUB_TOKEN": "github_pat_xxxxx",
+        "MESS_GITHUB_ONLY": "true",
+        "MESS_AGENT_ID": "claude-desktop"
+      }
+    }
+  }
+}
+```
+
+### Linux
+
+Edit `~/.config/claude/claude_desktop_config.json` with the same structure.
+
+### Windows
+
+Edit `%APPDATA%\Claude\claude_desktop_config.json` with the same structure.
+
+After editing, restart Claude Desktop.
+
+## Setting up with Claude Code
+
+Add to your Claude Code MCP settings or use the command line:
+
+```bash
+export MESS_GITHUB_REPO=your-username/mess-exchange
+export MESS_GITHUB_TOKEN=github_pat_xxxxx
+export MESS_GITHUB_ONLY=true
+export MESS_AGENT_ID=claude-code
+
+node /path/to/mcp/index.js
+```
+
+## Self-Hosting Locally (No Cloud)
+
+For a completely local setup without GitHub:
+
+### 1. Create the local exchange directory
+
+```bash
+mkdir -p ~/.mess/{received,executing,finished,canceled}
+```
+
+### 2. Configure Claude Desktop for local mode
+
+```json
+{
+  "mcpServers": {
+    "mess": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp/index.js"],
+      "env": {
+        "MESS_DIR": "~/.mess",
+        "MESS_AGENT_ID": "claude-desktop"
+      }
+    }
+  }
+}
+```
+
+### 3. Run the client locally
+
+Open `client/index.html` directly in your browser. When configuring:
+
+1. Skip the GitHub token step (click "I have my token")
+2. For repository, you'll need to set up a local adapter (see below)
+
+**Note:** The web client currently requires GitHub. For fully local operation, you can:
+
+- View task files directly in `~/.mess/received/`
+- Use any text editor to respond to tasks
+- Create a simple local web server (future enhancement)
+
+### Local File Format
+
+Tasks are stored as YAML files in `~/.mess/<status>/<ref>.messe-af.yaml`:
+
+```yaml
+ref: 2026-02-01-001
+requestor: claude-desktop
+executor: null
+status: pending
+created: 2026-02-01T10:00:00Z
+updated: 2026-02-01T10:00:00Z
+intent: Check if the garage door is closed
+priority: normal
+history:
+  - action: created
+    at: 2026-02-01T10:00:00Z
+    by: claude-desktop
+---
+from: claude-desktop
+received: 2026-02-01T10:00:00Z
+channel: mcp
+MESS:
+  - v: 1.0.0
+  - request:
+      intent: Check if the garage door is closed
+      context:
+        - Getting ready for bed
+      response_hint:
+        - image
+```
+
+## Tools Available
+
+### `mess`
+
+Send a MESS protocol message to create or update requests.
+
+**Create a request:**
+```yaml
+- v: 1.0.0
+- request:
+    intent: Check if the garage door is closed
+    context:
+      - Getting ready for bed
+    priority: normal
+    response_hint:
+      - image
+```
+
+**Cancel a request:**
+```yaml
+- cancel:
+    re: 2026-02-01-001
+    reason: No longer needed
+```
+
+### `mess_status`
+
+Check status of requests.
+
+- Without `ref`: Lists all pending/in-progress requests
+- With `ref`: Returns full details including message history
+
+## Troubleshooting
+
+### "MESS MCP Server started" but no tools appear
+
+- Restart Claude Desktop after config changes
+- Check the config file path is correct for your OS
+- Verify JSON syntax is valid
+
+### GitHub API errors
+
+- Ensure your token has `Contents: Read and write` permission
+- Token must have access to the specific repository
+- Check repo name format is `owner/repo` not a URL
+
+### Permission errors on local files
+
+```bash
+# Fix permissions
+chmod -R 755 ~/.mess
+```
+
+## Development
+
+Run the server directly for testing:
+
+```bash
+# GitHub mode
+MESS_GITHUB_REPO=user/repo MESS_GITHUB_TOKEN=ghp_xxx node index.js
+
+# Local mode
+MESS_DIR=~/.mess node index.js
+```
+
+The server communicates via stdio, so you'll see startup logs on stderr.

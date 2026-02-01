@@ -196,26 +196,32 @@ Toggle whether this client can post new requests (act as requestor) or only resp
 
 ## Connecting Claude Desktop
 
-Add to your Claude Desktop config:
+The included MCP server lets Claude create and manage MESS requests. See [`mcp/README.md`](mcp/README.md) for full documentation.
 
-**Mac**: `~/Library/Application Support/Claude/claude_desktop_config.json`  
+### Quick Setup
+
+**Mac**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Linux**: `~/.config/claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
 ```json
 {
   "mcpServers": {
     "mess": {
       "command": "node",
-      "args": ["/path/to/mess-mcp-server-github/index.js"],
+      "args": ["/absolute/path/to/your-repo/mcp/index.js"],
       "env": {
         "MESS_GITHUB_REPO": "your-username/mess-exchange",
         "MESS_GITHUB_TOKEN": "github_pat_xxxxx",
+        "MESS_GITHUB_ONLY": "true",
         "MESS_AGENT_ID": "claude-desktop"
       }
     }
   }
 }
 ```
+
+Install dependencies first: `cd mcp && npm install`
 
 Restart Claude Desktop. Now Claude can use `mess` and `mess_status` tools.
 
@@ -297,6 +303,46 @@ Drag and drop the `client/` folder.
 
 ### Local File
 Just open `client/index.html` in your browser — it works offline once configured!
+
+---
+
+## Self-Hosting Without GitHub
+
+For a completely local setup (no cloud services required):
+
+### 1. Create local directories
+
+```bash
+mkdir -p ~/.mess/{received,executing,finished,canceled}
+```
+
+### 2. Configure Claude for local mode
+
+```json
+{
+  "mcpServers": {
+    "mess": {
+      "command": "node",
+      "args": ["/path/to/mcp/index.js"],
+      "env": {
+        "MESS_DIR": "~/.mess",
+        "MESS_AGENT_ID": "claude-desktop"
+      }
+    }
+  }
+}
+```
+
+### 3. Respond to requests manually
+
+Without GitHub, the web client won't work. Instead:
+
+- View pending tasks: `ls ~/.mess/received/`
+- Read a task: `cat ~/.mess/received/2026-02-01-001.messe-af.yaml`
+- Move to executing: `mv ~/.mess/received/2026-02-01-001.messe-af.yaml ~/.mess/executing/`
+- Edit to add response and move to finished when complete
+
+See [`mcp/README.md`](mcp/README.md) for the full local file format and more details.
 
 ---
 
