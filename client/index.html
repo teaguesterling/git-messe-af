@@ -1,0 +1,1633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MESS</title>
+  <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --mess-50: #f0fdf4; --mess-100: #dcfce7; --mess-200: #bbf7d0;
+      --mess-300: #86efac; --mess-400: #4ade80; --mess-500: #22c55e;
+      --mess-600: #16a34a; --mess-700: #15803d; --mess-800: #166534;
+      --mess-900: #14532d;
+      --bg: #f9fafb; --bg-card: #ffffff; --bg-hover: #f3f4f6;
+      --text: #111827; --text-secondary: #6b7280; --text-muted: #9ca3af;
+      --border: #e5e7eb; --border-light: #f3f4f6;
+    }
+    [data-theme="dark"] {
+      --bg: #0f172a; --bg-card: #1e293b; --bg-hover: #334155;
+      --text: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #64748b;
+      --border: #334155; --border-light: #1e293b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { 
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg); color: var(--text);
+      min-height: 100vh; transition: background 0.3s, color 0.3s;
+    }
+    .mono { font-family: 'JetBrains Mono', Menlo, monospace; }
+    
+    /* Animations */
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .animate-fade { animation: fadeIn 0.3s ease-out; }
+    .animate-slide { animation: slideUp 0.3s ease-out; }
+    .loading { animation: pulse 1.5s infinite; }
+    
+    /* Layout */
+    .container { max-width: 32rem; margin: 0 auto; padding: 1rem; }
+    .flex { display: flex; } .flex-col { flex-direction: column; }
+    .items-center { align-items: center; } .justify-center { justify-content: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-1 { gap: 0.25rem; } .gap-2 { gap: 0.5rem; } .gap-3 { gap: 0.75rem; } .gap-4 { gap: 1rem; }
+    .flex-1 { flex: 1; } .flex-wrap { flex-wrap: wrap; }
+    .w-full { width: 100%; } .min-w-0 { min-width: 0; }
+    .h-screen { height: 100vh; } .min-h-screen { min-height: 100vh; }
+    .overflow-y-auto { overflow-y: auto; } .overflow-x-auto { overflow-x: auto; }
+    .hidden { display: none !important; }
+    .shrink-0 { flex-shrink: 0; }
+    
+    /* Spacing */
+    .p-2 { padding: 0.5rem; } .p-3 { padding: 0.75rem; } .p-4 { padding: 1rem; } 
+    .p-5 { padding: 1.25rem; } .p-6 { padding: 1.5rem; } .p-8 { padding: 2rem; }
+    .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+    .px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+    .px-4 { padding-left: 1rem; padding-right: 1rem; }
+    .px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+    .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+    .py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+    .py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+    .pt-4 { padding-top: 1rem; } .pt-8 { padding-top: 2rem; } .pt-12 { padding-top: 3rem; }
+    .pb-4 { padding-bottom: 1rem; } .pb-8 { padding-bottom: 2rem; } .pb-24 { padding-bottom: 6rem; }
+    .mb-1 { margin-bottom: 0.25rem; } .mb-2 { margin-bottom: 0.5rem; } 
+    .mb-3 { margin-bottom: 0.75rem; } .mb-4 { margin-bottom: 1rem; }
+    .mb-6 { margin-bottom: 1.5rem; } .mb-8 { margin-bottom: 2rem; } .mb-10 { margin-bottom: 2.5rem; }
+    .mt-1 { margin-top: 0.25rem; } .mt-2 { margin-top: 0.5rem; } .mt-3 { margin-top: 0.75rem; }
+    .ml-8 { margin-left: 2rem; }
+    .space-y-2 > * + * { margin-top: 0.5rem; }
+    .space-y-3 > * + * { margin-top: 0.75rem; }
+    .space-y-4 > * + * { margin-top: 1rem; }
+    .space-y-6 > * + * { margin-top: 1.5rem; }
+    
+    /* Typography */
+    .text-xs { font-size: 0.75rem; } .text-sm { font-size: 0.875rem; }
+    .text-lg { font-size: 1.125rem; } .text-xl { font-size: 1.25rem; }
+    .text-2xl { font-size: 1.5rem; } .text-4xl { font-size: 2.25rem; }
+    .font-medium { font-weight: 500; } .font-semibold { font-weight: 600; } .font-bold { font-weight: 700; }
+    .text-center { text-align: center; }
+    .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .whitespace-nowrap { white-space: nowrap; }
+    .whitespace-pre-wrap { white-space: pre-wrap; }
+    .capitalize { text-transform: capitalize; }
+    .italic { font-style: italic; }
+    
+    /* Colors */
+    .text-primary { color: var(--text); }
+    .text-secondary { color: var(--text-secondary); }
+    .text-muted { color: var(--text-muted); }
+    .text-mess { color: var(--mess-600); }
+    [data-theme="dark"] .text-mess { color: var(--mess-400); }
+    .text-red { color: #dc2626; } .text-amber { color: #d97706; }
+    .text-blue { color: #2563eb; } .text-purple { color: #7c3aed; }
+    .text-green { color: #16a34a; } .text-white { color: white; }
+    
+    /* Backgrounds */
+    .bg-page { background: var(--bg); }
+    .bg-card { background: var(--bg-card); }
+    .bg-hover { background: var(--bg-hover); }
+    .bg-mess { background: var(--mess-500); }
+    .bg-mess-light { background: var(--mess-50); }
+    [data-theme="dark"] .bg-mess-light { background: rgba(34, 197, 94, 0.15); }
+    .bg-blue-light { background: #dbeafe; }
+    [data-theme="dark"] .bg-blue-light { background: rgba(37, 99, 235, 0.2); }
+    .bg-amber-light { background: #fef3c7; }
+    [data-theme="dark"] .bg-amber-light { background: rgba(217, 119, 6, 0.2); }
+    .bg-red-light { background: #fee2e2; }
+    [data-theme="dark"] .bg-red-light { background: rgba(220, 38, 38, 0.2); }
+    .bg-purple-light { background: #ede9fe; }
+    [data-theme="dark"] .bg-purple-light { background: rgba(124, 58, 237, 0.2); }
+    .bg-gray-light { background: #f3f4f6; }
+    [data-theme="dark"] .bg-gray-light { background: #374151; }
+    
+    /* Borders */
+    .border { border: 1px solid var(--border); }
+    .border-t { border-top: 1px solid var(--border); }
+    .border-b { border-bottom: 1px solid var(--border); }
+    .border-2 { border-width: 2px; }
+    .border-mess { border-color: var(--mess-300); }
+    .border-red { border-color: #fca5a5; }
+    .border-purple { border-color: #c4b5fd; }
+    .rounded { border-radius: 0.375rem; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .rounded-xl { border-radius: 0.75rem; }
+    .rounded-2xl { border-radius: 1rem; }
+    .rounded-3xl { border-radius: 1.5rem; }
+    .rounded-full { border-radius: 9999px; }
+    
+    /* Shadows */
+    .shadow { box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); }
+    .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); }
+    .shadow-mess { box-shadow: 0 10px 25px -5px rgba(34, 197, 94, 0.3); }
+    
+    /* Components */
+    .card {
+      background: var(--bg-card); border-radius: 1rem;
+      border: 1px solid var(--border-light); box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .glass {
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      background: rgba(255,255,255,0.8); border-bottom: 1px solid var(--border-light);
+    }
+    [data-theme="dark"] .glass {
+      background: rgba(30,41,59,0.8);
+    }
+    
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+      padding: 0.75rem 1.5rem; border-radius: 0.75rem; font-weight: 500;
+      cursor: pointer; transition: all 0.2s; border: none; font-size: 0.875rem;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, var(--mess-500), #10b981);
+      color: white; box-shadow: 0 4px 14px rgba(34, 197, 94, 0.3);
+    }
+    .btn-primary:hover { box-shadow: 0 6px 20px rgba(34, 197, 94, 0.4); }
+    
+    .btn-secondary {
+      background: var(--bg-hover); color: var(--text);
+    }
+    .btn-secondary:hover { background: var(--border); }
+    
+    .btn-ghost {
+      background: transparent; color: var(--text-secondary); padding: 0.5rem;
+    }
+    .btn-ghost:hover { background: var(--bg-hover); }
+    
+    .btn-sm { padding: 0.5rem 1rem; font-size: 0.875rem; }
+    
+    .input {
+      width: 100%; padding: 0.75rem; border-radius: 0.75rem;
+      border: 1px solid var(--border); background: var(--bg-card);
+      color: var(--text); font-size: 0.875rem; transition: all 0.2s;
+    }
+    .input:focus {
+      outline: none; border-color: var(--mess-500);
+      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+    }
+    .input::placeholder { color: var(--text-muted); }
+    
+    select.input { cursor: pointer; }
+    textarea.input { resize: none; }
+    
+    .badge {
+      display: inline-flex; align-items: center; padding: 0.25rem 0.625rem;
+      border-radius: 9999px; font-size: 0.75rem; font-weight: 500;
+    }
+    
+    .tab {
+      padding: 0.75rem 1rem; font-weight: 500; font-size: 0.875rem;
+      color: var(--text-muted); border-bottom: 2px solid transparent;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .tab:hover { color: var(--text-secondary); }
+    .tab.active { color: var(--mess-600); border-color: var(--mess-500); }
+    [data-theme="dark"] .tab.active { color: var(--mess-400); }
+    
+    .thread-row {
+      padding: 1rem; cursor: pointer; transition: background 0.2s;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .thread-row:hover { background: var(--bg-hover); }
+    .thread-row:active { background: var(--border); }
+    
+    .icon-box {
+      width: 2.5rem; height: 2.5rem; border-radius: 0.75rem;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; flex-shrink: 0;
+    }
+    .icon-box-lg {
+      width: 5rem; height: 5rem; border-radius: 1.5rem; font-size: 2.5rem;
+    }
+    
+    .gradient-mesh {
+      background: 
+        radial-gradient(at 40% 20%, rgba(34, 197, 94, 0.12) 0px, transparent 50%),
+        radial-gradient(at 80% 0%, rgba(6, 182, 212, 0.08) 0px, transparent 50%),
+        radial-gradient(at 0% 50%, rgba(244, 63, 94, 0.06) 0px, transparent 50%),
+        radial-gradient(at 80% 50%, rgba(139, 92, 246, 0.08) 0px, transparent 50%);
+    }
+    [data-theme="dark"] .gradient-mesh {
+      background: 
+        radial-gradient(at 40% 20%, rgba(34, 197, 94, 0.15) 0px, transparent 50%),
+        radial-gradient(at 80% 0%, rgba(6, 182, 212, 0.1) 0px, transparent 50%),
+        radial-gradient(at 0% 50%, rgba(244, 63, 94, 0.05) 0px, transparent 50%),
+        radial-gradient(at 80% 50%, rgba(139, 92, 246, 0.12) 0px, transparent 50%);
+    }
+    
+    .chip {
+      display: inline-flex; align-items: center; gap: 0.25rem;
+      padding: 0.375rem 0.625rem; border-radius: 0.5rem;
+      font-size: 0.75rem; cursor: pointer; transition: all 0.2s;
+      background: var(--bg-card); border: 1px solid var(--border);
+    }
+    .chip:hover { background: var(--bg-hover); }
+    .chip.selected { background: var(--mess-100); border-color: var(--mess-300); color: var(--mess-700); }
+    [data-theme="dark"] .chip.selected { background: rgba(34, 197, 94, 0.2); border-color: var(--mess-600); color: var(--mess-400); }
+    
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem; z-index: 50;
+    }
+    .modal { max-width: 28rem; width: 100%; max-height: 90vh; overflow-y: auto; }
+    
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    
+    /* Checkbox styling */
+    input[type="checkbox"] {
+      width: 1.25rem; height: 1.25rem; border-radius: 0.375rem;
+      border: 1px solid var(--border); accent-color: var(--mess-500);
+    }
+    
+    /* Utilities */
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+    .sticky { position: sticky; top: 0; z-index: 10; }
+    .relative { position: relative; }
+    .cursor-pointer { cursor: pointer; }
+    .select-none { user-select: none; }
+    .max-h-48 { max-height: 12rem; }
+    .max-h-32 { max-height: 8rem; }
+  </style>
+</head>
+<body class="bg-page">
+  <div id="app"></div>
+
+  <script type="module">
+    // ============ Theme Management ============
+    function initTheme() {
+      const stored = localStorage.getItem('mess-theme');
+      if (stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+      updateThemeIcons();
+    }
+    
+    function toggleTheme() {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+      localStorage.setItem('mess-theme', isDark ? 'light' : 'dark');
+      updateThemeIcons();
+    }
+    
+    function updateThemeIcons() {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      document.querySelectorAll('.theme-light').forEach(el => el.style.display = isDark ? 'none' : 'inline');
+      document.querySelectorAll('.theme-dark').forEach(el => el.style.display = isDark ? 'inline' : 'none');
+    }
+    
+    initTheme();
+
+    // ============ Capability Definitions ============
+    const CAPABILITIES = {
+      physical: {
+        label: 'Physical Tasks',
+        icon: '🏃',
+        color: 'orange',
+        items: {
+          'check:visual': { label: 'Visual checks', desc: 'Look at something, read a display' },
+          'check:physical': { label: 'Physical inspection', desc: 'Touch, open, measure' },
+          'fetch:indoor': { label: 'Fetch items (indoor)', desc: 'Get something from another room' },
+          'fetch:outdoor': { label: 'Fetch items (outdoor)', desc: 'Pick up packages, check mailbox' },
+          'operate:appliance': { label: 'Operate appliances', desc: 'Thermostat, washer, coffee maker' },
+          'operate:vehicle': { label: 'Vehicle tasks', desc: 'Drive, check car status' },
+        }
+      },
+      communication: {
+        label: 'Communication',
+        icon: '💬',
+        color: 'blue',
+        items: {
+          'call:phone': { label: 'Phone calls', desc: 'Make or receive calls' },
+          'message:text': { label: 'Text messages', desc: 'Send SMS/texts' },
+          'interact:person': { label: 'In-person interaction', desc: 'Talk to delivery, neighbors' },
+        }
+      },
+      information: {
+        label: 'Information',
+        icon: '📋',
+        color: 'purple',
+        items: {
+          'photo:capture': { label: 'Take photos', desc: 'Capture and send images' },
+          'read:document': { label: 'Read documents', desc: 'Physical mail, papers' },
+          'research:local': { label: 'Local research', desc: 'Check store hours, availability' },
+        }
+      },
+      care: {
+        label: 'Care Tasks',
+        icon: '🌱',
+        color: 'green',
+        items: {
+          'care:plant': { label: 'Plant care', desc: 'Water, prune, check' },
+          'care:pet': { label: 'Pet care', desc: 'Feed, walk, check on' },
+          'care:child': { label: 'Child supervision', desc: 'Check on, assist' },
+        }
+      }
+    };
+
+    // ============ GitHub API Client ============
+    class GitHubExchange {
+      constructor(owner, repo, token) {
+        this.owner = owner;
+        this.repo = repo;
+        this.token = token;
+        this.baseUrl = `https://api.github.com/repos/${owner}/${repo}`;
+      }
+
+      async request(path, options = {}) {
+        const res = await fetch(`${this.baseUrl}${path}`, {
+          ...options,
+          headers: {
+            'Authorization': `Bearer ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json',
+            ...options.headers
+          }
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `GitHub API error: ${res.status}`);
+        }
+        return res.json();
+      }
+
+      async testConnection() {
+        const res = await fetch(`${this.baseUrl}`, {
+          headers: {
+            'Authorization': `Bearer ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+          }
+        });
+        if (!res.ok) {
+          if (res.status === 401) throw new Error('Invalid token');
+          if (res.status === 404) throw new Error('Repository not found (check name or token permissions)');
+          throw new Error(`Connection failed: ${res.status}`);
+        }
+        const data = await res.json();
+        return { name: data.full_name, private: data.private, permissions: data.permissions };
+      }
+
+      async listFolder(folder) {
+        try {
+          const data = await this.request(`/contents/exchange/state=${folder}`);
+          return data.filter(f => f.name.endsWith('.messe-af.yaml'));
+        } catch (e) {
+          if (e.message.includes('404')) return [];
+          throw e;
+        }
+      }
+
+      async getFile(path) {
+        const data = await this.request(`/contents/${path}`);
+        const content = atob(data.content.replace(/\n/g, ''));
+        return { content, sha: data.sha };
+      }
+
+      async putFile(path, content, message, sha = null) {
+        const body = { message, content: btoa(unescape(encodeURIComponent(content))) };
+        if (sha) body.sha = sha;
+        return await this.request(`/contents/${path}`, { method: 'PUT', body: JSON.stringify(body) });
+      }
+
+      async deleteFile(path, sha, message) {
+        return await this.request(`/contents/${path}`, { method: 'DELETE', body: JSON.stringify({ message, sha }) });
+      }
+
+      async getThread(folder, filename) {
+        const path = `exchange/state=${folder}/${filename}`;
+        const { content, sha } = await this.getFile(path);
+        const docs = content.split(/^---$/m).filter(d => d.trim()).map(d => jsyaml.load(d));
+        return { envelope: docs[0], messages: docs.slice(1), _path: path, _sha: sha };
+      }
+
+      async listThreads() {
+        const folders = ['received', 'executing', 'finished', 'canceled'];
+        const results = { received: [], executing: [], finished: [], canceled: [] };
+        
+        for (const folder of folders) {
+          const files = await this.listFolder(folder);
+          for (const file of files) {
+            try {
+              const thread = await this.getThread(folder, file.name);
+              results[folder].push({ ...thread.envelope, messages: thread.messages, _path: thread._path, _sha: thread._sha });
+            } catch (e) { console.error(`Failed to load ${file.name}:`, e); }
+          }
+        }
+        
+        for (const folder of folders) {
+          results[folder].sort((a, b) => new Date(b.updated) - new Date(a.updated));
+        }
+        return results;
+      }
+
+      serializeThread(envelope, messages) {
+        return [envelope, ...messages].map(d => jsyaml.dump(d, { lineWidth: -1 })).join('---\n');
+      }
+
+      async createRequest(from, request) {
+        const today = new Date().toISOString().split('T')[0];
+        const existing = await this.listFolder('received');
+        const todayFiles = existing.filter(f => f.name.startsWith(today));
+        const ref = `${today}-${(todayFiles.length + 1).toString().padStart(3, '0')}`;
+        
+        const now = new Date().toISOString();
+        const envelope = {
+          ref, requestor: from, executor: null, status: 'pending',
+          created: now, updated: now, intent: request.intent,
+          priority: request.priority || 'normal',
+          history: [{ action: 'created', at: now, by: from }]
+        };
+        
+        const messages = [
+          { from, received: now, channel: 'github', MESS: [{ v: '1.0.0' }, { request }] },
+          { from: 'exchange', received: now, MESS: [{ ack: { re: 'last', ref } }] }
+        ];
+        
+        await this.putFile(`exchange/state=received/${ref}.messe-af.yaml`, this.serializeThread(envelope, messages), `New request: ${request.intent}`);
+        return { ref, status: 'pending' };
+      }
+
+      async updateThread(thread, from, mess, newStatus = null) {
+        const now = new Date().toISOString();
+        const envelope = { ...thread.envelope };
+        const messages = [...thread.messages, { from, received: now, channel: 'github', MESS: mess }];
+        
+        const oldFolder = this.getFolder(envelope.status);
+        if (newStatus && newStatus !== envelope.status) {
+          envelope.status = newStatus;
+          envelope.updated = now;
+          envelope.history.push({ action: newStatus, at: now, by: from });
+          if (newStatus === 'claimed') envelope.executor = from;
+        }
+        
+        const content = this.serializeThread(envelope, messages);
+        const newFolder = this.getFolder(envelope.status);
+        
+        if (newFolder !== oldFolder) {
+          await this.putFile(`exchange/state=${newFolder}/${envelope.ref}.messe-af.yaml`, content, `${newStatus}: ${envelope.intent}`);
+          await this.deleteFile(thread._path, thread._sha, `Move to state=${newFolder}`);
+        } else {
+          await this.putFile(thread._path, content, `Update: ${envelope.intent}`, thread._sha);
+        }
+        return envelope;
+      }
+
+      getFolder(status) {
+        const map = {
+          pending: 'received', claimed: 'executing', in_progress: 'executing',
+          waiting: 'executing', held: 'executing', needs_input: 'executing',
+          completed: 'finished', partial: 'finished',
+          failed: 'canceled', declined: 'canceled', cancelled: 'canceled', expired: 'canceled'
+        };
+        return map[status] || 'received';
+      }
+
+      async registerExecutor(config) {
+        const path = `executors/${config.executor_id}.yaml`;
+        const content = jsyaml.dump(config, { lineWidth: -1 });
+        try {
+          const existing = await this.getFile(path);
+          await this.putFile(path, content, `Update executor: ${config.executor_id}`, existing.sha);
+        } catch (e) {
+          await this.putFile(path, content, `Register executor: ${config.executor_id}`);
+        }
+      }
+    }
+
+    // ============ App State ============
+    const state = {
+      config: JSON.parse(localStorage.getItem('mess-executor-config') || 'null'),
+      github: null,
+      threads: { received: [], executing: [], finished: [], canceled: [] },
+      currentFolder: 'received',
+      selectedThread: null,
+      loading: false,
+      error: null,
+      view: 'loading',
+      setupStep: 1,
+      connectionTest: null,
+      showNewRequest: false
+    };
+
+    function init() {
+      if (state.config?.token && state.config?.repo && state.config?.executorId) {
+        const [owner, repo] = state.config.repo.split('/');
+        state.github = new GitHubExchange(owner, repo, state.config.token);
+        state.view = 'main';
+        render();
+        refresh();
+      } else {
+        state.view = 'setup';
+        state.setupStep = 1;
+        render();
+      }
+    }
+
+    // ============ Render Functions ============
+    function render() {
+      const app = document.getElementById('app');
+      
+      switch (state.view) {
+        case 'setup':
+          app.innerHTML = renderSetup();
+          bindSetupEvents();
+          break;
+        case 'settings':
+          app.innerHTML = renderSettings();
+          bindSettingsEvents();
+          break;
+        case 'main':
+          app.innerHTML = renderMain();
+          bindMainEvents();
+          if (state.selectedThread) {
+            app.innerHTML = renderThreadDetail();
+            bindDetailEvents();
+          }
+          if (state.showNewRequest) {
+            app.insertAdjacentHTML('beforeend', renderNewRequestModal());
+            bindNewRequestEvents();
+          }
+          break;
+        default:
+          app.innerHTML = '<div class="p-8 text-center">Loading...</div>';
+      }
+      
+      // Update theme icons after render
+      updateThemeIcons();
+    }
+
+    function renderSetup() {
+      const steps = [
+        { num: 1, label: 'Token', icon: '🔑' },
+        { num: 2, label: 'Connect', icon: '🔗' },
+        { num: 3, label: 'Profile', icon: '👤' },
+      ];
+      
+      return `
+        <div class="min-h-screen gradient-mesh">
+          <div class="container pt-12 pb-8" style="max-width:28rem">
+            <!-- Logo & Header -->
+            <div class="text-center mb-10">
+              <div class="icon-box icon-box-lg bg-mess shadow-mess" style="margin:0 auto 1.5rem;background:linear-gradient(135deg,var(--mess-400),#10b981)">
+                <span>📬</span>
+              </div>
+              <h1 class="text-4xl font-bold text-mess">MESS</h1>
+              <p class="text-secondary mt-2">Meatspace Exchange for Synchronous Services</p>
+            </div>
+            
+            <!-- Progress Steps -->
+            <div class="flex justify-center items-center gap-3 mb-10">
+              ${steps.map((s, i) => `
+                <div class="flex items-center">
+                  <div class="flex-col items-center" style="display:flex;flex-direction:column">
+                    <div class="icon-box font-semibold" style="width:3rem;height:3rem;transition:all 0.3s;
+                      ${state.setupStep > s.num 
+                        ? 'background:var(--mess-500);color:white;box-shadow:0 4px 14px rgba(34,197,94,0.3)' 
+                        : state.setupStep === s.num 
+                          ? 'background:linear-gradient(135deg,var(--mess-400),#10b981);color:white;box-shadow:0 4px 14px rgba(34,197,94,0.3);transform:scale(1.1)' 
+                          : 'background:var(--bg-hover);color:var(--text-muted)'}">
+                      ${state.setupStep > s.num ? '✓' : s.icon}
+                    </div>
+                    <span class="text-xs mt-2 font-medium" style="color:${state.setupStep >= s.num ? 'var(--mess-600)' : 'var(--text-muted)'}">${s.label}</span>
+                  </div>
+                  ${i < steps.length - 1 ? `
+                    <div style="width:3rem;height:4px;margin:0 0.5rem;border-radius:2px;transition:all 0.3s;background:${state.setupStep > s.num ? 'var(--mess-500)' : 'var(--bg-hover)'}"></div>
+                  ` : ''}
+                </div>
+              `).join('')}
+            </div>
+            
+            <!-- Card -->
+            <div class="card p-6 animate-fade">
+              ${state.setupStep === 1 ? renderSetupStep1() : ''}
+              ${state.setupStep === 2 ? renderSetupStep2() : ''}
+              ${state.setupStep === 3 ? renderSetupStep3() : ''}
+            </div>
+            
+            <!-- Theme Toggle -->
+            <div class="flex justify-center mt-3">
+              <button id="theme-toggle" class="btn btn-ghost text-sm">
+                <span class="theme-light">🌙 Dark mode</span>
+                <span class="theme-dark hidden">☀️ Light mode</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSetupStep1() {
+      return `
+        <div class="space-y-6">
+          <div>
+            <h2 class="text-2xl font-bold text-primary">Create a GitHub Token</h2>
+            <p class="text-secondary mt-2">You'll need a Personal Access Token to connect to your exchange repository.</p>
+          </div>
+          
+          <div class="bg-mess-light rounded-2xl p-5 border border-mess">
+            <h3 class="font-semibold text-mess mb-3 flex items-center gap-2">
+              <span>📋</span> Quick Setup
+            </h3>
+            <ol class="text-sm text-secondary space-y-2">
+              <li class="flex gap-2"><span class="mono bg-hover px-1 rounded">1</span> Click the button below</li>
+              <li class="flex gap-2"><span class="mono bg-hover px-1 rounded">2</span> Name: <code class="mono bg-hover px-1 rounded">MESS Exchange</code></li>
+              <li class="flex gap-2"><span class="mono bg-hover px-1 rounded">3</span> Repository access: <strong>Only select repositories</strong></li>
+              <li class="flex gap-2"><span class="mono bg-hover px-1 rounded">4</span> Permissions → Contents: <strong>Read and write</strong></li>
+            </ol>
+          </div>
+          
+          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" class="btn btn-secondary w-full">
+            <svg style="width:1.25rem;height:1.25rem" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            Open GitHub Settings
+          </a>
+          
+          <button id="next-step" class="btn btn-primary w-full">
+            I have my token →
+          </button>
+        </div>
+      `;
+    }
+
+    function renderSetupStep2() {
+      return `
+        <div class="space-y-6">
+          <div>
+            <h2 class="text-2xl font-bold text-primary">Connect Your Repository</h2>
+            <p class="text-secondary mt-2">Enter your token and repository details.</p>
+          </div>
+          
+          <div class="space-y-4">
+            <div>
+              <label class="text-sm font-medium text-secondary mb-2" style="display:block">GitHub Token</label>
+              <input type="password" id="input-token" value="${state.config?.token || ''}"
+                placeholder="github_pat_xxxxx or ghp_xxxxx" class="input mono text-sm">
+              <p class="text-xs text-muted mt-1">🔒 Stored locally in your browser only</p>
+            </div>
+            
+            <div>
+              <label class="text-sm font-medium text-secondary mb-2" style="display:block">Repository</label>
+              <input type="text" id="input-repo" value="${state.config?.repo || ''}"
+                placeholder="username/mess-exchange" class="input">
+            </div>
+          </div>
+          
+          ${state.error ? `
+            <div class="bg-red-light border border-red rounded-xl p-4 animate-fade">
+              <p class="text-red text-sm flex items-center gap-2">
+                <span>⚠️</span> ${state.error}
+              </p>
+            </div>
+          ` : ''}
+          
+          ${state.connectionTest ? `
+            <div class="bg-mess-light border border-mess rounded-xl p-4 animate-fade">
+              <p class="text-mess font-medium flex items-center gap-2">
+                <span>✓</span> Connected to ${state.connectionTest.name}
+              </p>
+              <p class="text-secondary text-sm mt-1">
+                ${state.connectionTest.private ? '🔒 Private' : '🌐 Public'} repository
+                ${state.connectionTest.permissions?.push ? ' · Write access ✓' : ''}
+              </p>
+            </div>
+          ` : ''}
+          
+          <div class="flex gap-3">
+            <button id="prev-step" class="btn btn-secondary flex-1">← Back</button>
+            <button id="test-connection" class="btn btn-secondary flex-1 ${state.loading ? 'loading' : ''}">
+              ${state.loading ? 'Testing...' : 'Test'}
+            </button>
+            <button id="next-step" ${!state.connectionTest ? 'disabled' : ''} class="btn btn-primary flex-1">
+              Next →
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSetupStep3() {
+      const savedCaps = state.config?.capabilities || [];
+      return `
+        <div class="space-y-6">
+          <div>
+            <h2 class="text-2xl font-bold text-primary">Your Profile</h2>
+            <p class="text-secondary mt-2">Tell us about yourself so requests can be routed to you.</p>
+          </div>
+          
+          <div class="space-y-4">
+            <div>
+              <label class="text-sm font-medium text-secondary mb-2" style="display:block">Executor Name</label>
+              <input type="text" id="input-executor-id" value="${state.config?.executorId || ''}"
+                placeholder="e.g., teague-phone" class="input">
+            </div>
+            
+            <div>
+              <label class="text-sm font-medium text-secondary mb-2" style="display:block">Display Name</label>
+              <input type="text" id="input-display-name" value="${state.config?.displayName || ''}"
+                placeholder="e.g., Teague's Phone" class="input">
+            </div>
+          </div>
+          
+          <div>
+            <label class="text-sm font-medium text-secondary mb-3" style="display:block">Capabilities</label>
+            <div class="space-y-3 max-h-48 overflow-y-auto" style="padding-right:0.5rem">
+              ${Object.entries(CAPABILITIES).map(([catKey, cat]) => `
+                <div class="bg-hover rounded-xl p-3">
+                  <div class="font-medium text-secondary mb-2 flex items-center gap-2">
+                    <span>${cat.icon}</span> ${cat.label}
+                  </div>
+                  <div class="flex flex-wrap gap-2">
+                    ${Object.entries(cat.items).map(([capKey, cap]) => `
+                      <label class="chip ${savedCaps.includes(capKey) ? 'selected' : ''}" data-cap="${capKey}">
+                        <input type="checkbox" class="cap-checkbox sr-only" data-cap="${capKey}" ${savedCaps.includes(capKey) ? 'checked' : ''}>
+                        ${cap.label}
+                      </label>
+                    `).join('')}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          
+          <label class="flex items-center gap-3 p-3 bg-hover rounded-xl cursor-pointer">
+            <input type="checkbox" id="input-can-request" ${state.config?.canRequest !== false ? 'checked' : ''}>
+            <div>
+              <div class="font-medium text-primary">Can create requests</div>
+              <div class="text-xs text-muted">Allow posting new requests from this client</div>
+            </div>
+          </label>
+          
+          ${state.error ? `
+            <div class="bg-red-light border border-red rounded-xl p-4">
+              <p class="text-red text-sm">${state.error}</p>
+            </div>
+          ` : ''}
+          
+          <div class="flex gap-3">
+            <button id="prev-step" class="btn btn-secondary">← Back</button>
+            <button id="finish-setup" class="btn btn-primary flex-1">
+              ✓ Complete Setup
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSettings() {
+      const savedCaps = state.config?.capabilities || [];
+      const savedNotifs = state.config?.notifications || [];
+      
+      return `
+        <div class="min-h-screen bg-page">
+          <!-- Header -->
+          <div class="glass sticky p-4 flex items-center gap-4">
+            <button id="back-to-main" class="btn btn-ghost">
+              <svg style="width:1.5rem;height:1.5rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+              </svg>
+            </button>
+            <h1 class="text-xl font-bold">Settings</h1>
+            <div class="flex-1"></div>
+            <button id="theme-toggle" class="btn btn-ghost">
+              <span class="theme-light">🌙</span>
+              <span class="theme-dark hidden">☀️</span>
+            </button>
+          </div>
+          
+          <div class="container space-y-6 pb-24" style="max-width:28rem">
+            <!-- Connection -->
+            <div class="card p-5">
+              <h2 class="font-semibold text-primary mb-4 flex items-center gap-2">
+                <span>🔗</span> Connection
+              </h2>
+              <div class="space-y-4">
+                <div>
+                  <label class="text-sm text-secondary mb-1" style="display:block">Repository</label>
+                  <input type="text" id="settings-repo" value="${state.config?.repo || ''}" class="input text-sm">
+                </div>
+                <div>
+                  <label class="text-sm text-secondary mb-1" style="display:block">Token</label>
+                  <input type="password" id="settings-token" value="${state.config?.token || ''}" class="input text-sm mono">
+                </div>
+              </div>
+            </div>
+            
+            <!-- Profile -->
+            <div class="card p-5">
+              <h2 class="font-semibold text-primary mb-4 flex items-center gap-2">
+                <span>👤</span> Profile
+              </h2>
+              <div class="space-y-4">
+                <div>
+                  <label class="text-sm text-secondary mb-1" style="display:block">Executor ID</label>
+                  <input type="text" id="settings-executor-id" value="${state.config?.executorId || ''}" class="input text-sm">
+                </div>
+                <div>
+                  <label class="text-sm text-secondary mb-1" style="display:block">Display Name</label>
+                  <input type="text" id="settings-display-name" value="${state.config?.displayName || ''}" class="input text-sm">
+                </div>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" id="settings-can-request" ${state.config?.canRequest !== false ? 'checked' : ''}>
+                  <span class="text-sm text-secondary">Can create requests</span>
+                </label>
+              </div>
+            </div>
+            
+            <!-- Capabilities -->
+            <div class="card p-5">
+              <h2 class="font-semibold text-primary mb-4 flex items-center gap-2">
+                <span>⚡</span> Capabilities
+              </h2>
+              <div class="space-y-3 max-h-48 overflow-y-auto">
+                ${Object.entries(CAPABILITIES).map(([catKey, cat]) => `
+                  <div>
+                    <div class="text-sm font-medium text-secondary mb-2">${cat.icon} ${cat.label}</div>
+                    <div class="flex flex-wrap gap-1">
+                      ${Object.entries(cat.items).map(([capKey, cap]) => `
+                        <label class="chip ${savedCaps.includes(capKey) ? 'selected' : ''}" style="font-size:0.7rem">
+                          <input type="checkbox" class="settings-cap sr-only" data-cap="${capKey}" ${savedCaps.includes(capKey) ? 'checked' : ''}>
+                          ${cap.label}
+                        </label>
+                      `).join('')}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            
+            <!-- Notifications -->
+            <div class="card p-5">
+              <h2 class="font-semibold text-primary mb-4 flex items-center gap-2">
+                <span>🔔</span> Notifications
+              </h2>
+              
+              <div id="notif-list" class="space-y-2 mb-4">
+                ${savedNotifs.map((n, i) => `
+                  <div class="flex items-center gap-2 p-3 bg-hover rounded-xl text-sm animate-fade">
+                    <span class="icon-box bg-mess-light text-mess" style="width:2rem;height:2rem;font-size:0.875rem">
+                      ${getNotifIcon(n.type)}
+                    </span>
+                    <div class="flex-1 min-w-0">
+                      <div class="font-medium text-primary capitalize">${n.type.replace('_', ' ')}</div>
+                      <div class="text-xs text-muted truncate">${getNotifSummary(n)}</div>
+                    </div>
+                    <button class="remove-notif btn btn-ghost text-red" data-index="${i}">
+                      <svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                `).join('')}
+                ${savedNotifs.length === 0 ? '<p class="text-sm text-muted italic text-center py-4">No notifications configured</p>' : ''}
+              </div>
+              
+              <div class="border-t pt-4">
+                <select id="notif-type" class="input text-sm">
+                  <option value="">+ Add notification channel...</option>
+                  <option value="ntfy">📱 ntfy.sh (free push)</option>
+                  <option value="google_chat">💬 Google Chat</option>
+                  <option value="gmail">📧 Gmail</option>
+                  <option value="slack">💼 Slack</option>
+                  <option value="pushover">📲 Pushover</option>
+                  <option value="webhook">🔗 Custom webhook</option>
+                </select>
+                <div id="notif-config" class="mt-3 hidden animate-fade"></div>
+              </div>
+            </div>
+            
+            <!-- Preferences -->
+            <div class="card p-5">
+              <h2 class="font-semibold text-primary mb-4 flex items-center gap-2">
+                <span>⚙️</span> Preferences
+              </h2>
+              <div class="space-y-4">
+                <div>
+                  <label class="text-sm text-secondary mb-1" style="display:block">Minimum priority to notify</label>
+                  <select id="settings-min-priority" class="input text-sm">
+                    <option value="background" ${state.config?.preferences?.min_priority === 'background' ? 'selected' : ''}>Background (all)</option>
+                    <option value="normal" ${state.config?.preferences?.min_priority === 'normal' || !state.config?.preferences?.min_priority ? 'selected' : ''}>Normal+</option>
+                    <option value="elevated" ${state.config?.preferences?.min_priority === 'elevated' ? 'selected' : ''}>Elevated+</option>
+                    <option value="urgent" ${state.config?.preferences?.min_priority === 'urgent' ? 'selected' : ''}>Urgent only</option>
+                  </select>
+                </div>
+                <label class="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" id="settings-quiet-hours" ${state.config?.preferences?.quiet_hours?.enabled ? 'checked' : ''}>
+                  <span class="text-sm text-secondary">Enable quiet hours</span>
+                </label>
+                <div id="quiet-hours-config" class="${state.config?.preferences?.quiet_hours?.enabled ? '' : 'hidden'} ml-8 flex items-center gap-2">
+                  <input type="time" id="settings-quiet-start" value="${state.config?.preferences?.quiet_hours?.start || '22:00'}" class="input text-sm" style="width:7rem">
+                  <span class="text-muted">to</span>
+                  <input type="time" id="settings-quiet-end" value="${state.config?.preferences?.quiet_hours?.end || '07:00'}" class="input text-sm" style="width:7rem">
+                </div>
+              </div>
+            </div>
+            
+            <!-- Actions -->
+            <div class="space-y-3">
+              <button id="save-settings" class="btn btn-primary w-full">Save Changes</button>
+              <button id="reset-settings" class="btn w-full border-2 border-red text-red" style="background:transparent">
+                Reset & Start Over
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function getNotifIcon(type) {
+      const icons = { ntfy: '📱', google_chat: '💬', gmail: '📧', slack: '💼', pushover: '📲', email: '✉️', sms: '📱', webhook: '🔗' };
+      return icons[type] || '🔔';
+    }
+
+    function getNotifSummary(n) {
+      switch (n.type) {
+        case 'ntfy': return n.topic || 'topic not set';
+        case 'google_chat': return 'Google Chat webhook';
+        case 'gmail': return n.to || '(your Gmail)';
+        case 'slack': return 'Slack webhook';
+        case 'pushover': return n.user_key?.slice(0, 8) + '...' || 'user key not set';
+        case 'email': return n.address || 'email not set';
+        case 'sms': return n.phone || 'phone not set';
+        case 'webhook': return n.url || 'URL not set';
+        default: return '';
+      }
+    }
+
+    function renderNotifConfig(type) {
+      const configs = {
+        ntfy: `
+          <div class="space-y-3">
+            <input type="text" id="notif-ntfy-topic" placeholder="Topic name (e.g., my-mess-alerts)" class="input text-sm">
+            <input type="text" id="notif-ntfy-server" placeholder="Server (default: https://ntfy.sh)" class="input text-sm">
+            <button id="add-notif-btn" class="btn btn-primary w-full btn-sm">Add ntfy</button>
+          </div>`,
+        google_chat: `
+          <div class="space-y-3">
+            <input type="text" id="notif-gchat-webhook" placeholder="Google Chat webhook URL" class="input text-sm mono">
+            <p class="text-xs text-muted">Space → Apps & integrations → Webhooks</p>
+            <button id="add-notif-btn" class="btn btn-primary w-full btn-sm">Add Google Chat</button>
+          </div>`,
+        gmail: `
+          <div class="space-y-3">
+            <input type="email" id="notif-gmail-to" placeholder="Send to (default: your Gmail)" class="input text-sm">
+            <p class="text-xs text-muted">Set GMAIL_EMAIL and GMAIL_APP_PASSWORD as repo secrets</p>
+            <button id="add-notif-btn" class="btn btn-primary w-full btn-sm">Add Gmail</button>
+          </div>`,
+        slack: `
+          <div class="space-y-3">
+            <input type="text" id="notif-slack-webhook" placeholder="Slack webhook URL" class="input text-sm mono">
+            <button id="add-notif-btn" class="btn btn-primary w-full btn-sm">Add Slack</button>
+          </div>`,
+        pushover: `
+          <div class="space-y-3">
+            <input type="text" id="notif-pushover-user" placeholder="User key" class="input text-sm mono">
+            <p class="text-xs text-muted">App token is set as repo secret PUSHOVER_APP_TOKEN</p>
+            <button id="add-notif-btn" class="btn btn-primary w-full btn-sm">Add Pushover</button>
+          </div>`,
+        webhook: `
+          <div class="space-y-3">
+            <input type="url" id="notif-webhook-url" placeholder="https://example.com/webhook" class="input text-sm mono">
+            <button id="add-notif-btn" class="btn btn-primary w-full btn-sm">Add Webhook</button>
+          </div>`
+      };
+      return configs[type] || '';
+    }
+
+    function renderMain() {
+      const folders = [
+        { key: 'received', label: 'Inbox', icon: '📥', count: state.threads.received?.length },
+        { key: 'executing', label: 'Active', icon: '▶️', count: state.threads.executing?.length },
+        { key: 'finished', label: 'Done', icon: '✅', count: state.threads.finished?.length },
+        { key: 'canceled', label: 'Closed', icon: '❌', count: state.threads.canceled?.length }
+      ];
+      
+      const threads = state.threads[state.currentFolder] || [];
+      const canRequest = state.config?.canRequest !== false;
+      
+      return `
+        <div class="h-screen flex flex-col bg-page">
+          <!-- Header -->
+          <div class="glass p-4 flex items-center gap-3">
+            <div class="flex items-center gap-3">
+              <div class="icon-box bg-mess shadow-mess" style="background:linear-gradient(135deg,var(--mess-400),#10b981)">
+                <span>📬</span>
+              </div>
+              <div>
+                <h1 class="text-lg font-bold text-primary">MESS</h1>
+                <p class="text-xs text-muted">${state.config?.displayName || state.config?.executorId}</p>
+              </div>
+            </div>
+            <div class="flex-1"></div>
+            <button id="refresh" class="btn btn-ghost ${state.loading ? 'loading' : ''}" title="Refresh">
+              <svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+            </button>
+            <button id="theme-toggle" class="btn btn-ghost">
+              <span class="theme-light">🌙</span>
+              <span class="theme-dark hidden">☀️</span>
+            </button>
+            <button id="open-settings" class="btn btn-ghost" title="Settings">
+              <svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+            </button>
+            ${canRequest ? `
+              <button id="new-request" class="btn btn-primary btn-sm" title="New Request">
+                <span class="hidden-sm">+ New</span>
+                <span class="show-sm">+</span>
+              </button>
+            ` : ''}
+          </div>
+          
+          <!-- Tabs -->
+          <div class="flex gap-1 overflow-x-auto bg-card border-b" style="padding:0 0.5rem">
+            ${folders.map(f => `
+              <button data-folder="${f.key}" class="tab ${state.currentFolder === f.key ? 'active' : ''}">
+                <span>${f.icon}</span>
+                <span>${f.label}</span>
+                ${f.count ? `<span class="badge bg-hover text-muted" style="margin-left:0.25rem">${f.count}</span>` : ''}
+              </button>
+            `).join('')}
+          </div>
+          
+          <!-- Thread List -->
+          <div class="flex-1 overflow-y-auto">
+            ${state.loading && threads.length === 0 ? `
+              <div class="p-8 text-center">
+                <div class="icon-box icon-box-lg bg-hover loading" style="margin:0 auto 1rem">
+                  <span>📬</span>
+                </div>
+                <p class="text-muted">Loading...</p>
+              </div>
+            ` : threads.length === 0 ? `
+              <div class="p-8 text-center">
+                <div class="icon-box icon-box-lg bg-hover" style="margin:0 auto 1rem">
+                  <span>📭</span>
+                </div>
+                <p class="text-muted">No threads here</p>
+              </div>
+            ` : `
+              <div>
+                ${threads.map(t => renderThreadRow(t)).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderThreadRow(thread) {
+      const statusConfig = {
+        pending: { bg: 'bg-blue-light', text: 'text-blue', icon: '⏳' },
+        claimed: { bg: 'bg-amber-light', text: 'text-amber', icon: '👋' },
+        in_progress: { bg: 'bg-amber-light', text: 'text-amber', icon: '🔄' },
+        needs_input: { bg: 'bg-purple-light', text: 'text-purple', icon: '❓' },
+        completed: { bg: 'bg-mess-light', text: 'text-green', icon: '✅' },
+        failed: { bg: 'bg-red-light', text: 'text-red', icon: '❌' },
+        declined: { bg: 'bg-gray-light', text: 'text-muted', icon: '🚫' }
+      };
+      
+      const status = statusConfig[thread.status] || statusConfig.pending;
+      const wantsImage = thread.messages?.some(m => m.MESS?.some(item => item.request?.response_hint?.includes('image')));
+      const priorityColors = { urgent: 'text-red', elevated: 'text-amber', normal: 'text-muted', background: 'text-muted' };
+      
+      return `
+        <div class="thread-row animate-fade" data-ref="${thread.ref}">
+          <div class="flex items-start gap-3">
+            <div class="icon-box ${status.bg}">
+              <span>${status.icon}</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="badge ${status.bg} ${status.text}">${thread.status}</span>
+                ${thread.priority !== 'normal' ? `<span class="text-xs ${priorityColors[thread.priority]}">● ${thread.priority}</span>` : ''}
+                ${wantsImage ? '<span class="text-xs">📷</span>' : ''}
+              </div>
+              <p class="font-medium text-primary truncate">${thread.intent}</p>
+              <p class="text-sm text-muted mt-1">${thread.ref} · ${formatTime(thread.updated)}</p>
+            </div>
+            ${thread.status === 'pending' ? `
+              <button class="quick-claim btn btn-primary btn-sm shrink-0" data-ref="${thread.ref}">
+                Claim
+              </button>
+            ` : `
+              <svg class="shrink-0 text-muted" style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            `}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderThreadDetail() {
+      const t = state.selectedThread;
+      const canClaim = t.status === 'pending';
+      const canRespond = ['claimed', 'in_progress'].includes(t.status);
+      const needsInput = t.status === 'needs_input';
+      const wantsImage = t.messages?.some(m => m.MESS?.some(item => item.request?.response_hint?.includes('image')));
+      
+      return `
+        <div class="h-screen flex flex-col bg-page">
+          <!-- Header -->
+          <div class="glass p-4">
+            <button id="back" class="flex items-center gap-2 text-secondary mb-3" style="cursor:pointer">
+              <svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+              </svg>
+              Back
+            </button>
+            <h2 class="text-lg font-bold text-primary">${t.intent}</h2>
+            <p class="text-sm text-muted mt-1">
+              <span class="mono">${t.ref}</span> · from ${t.requestor}${t.executor ? ` · ${t.executor}` : ''}
+            </p>
+          </div>
+          
+          <!-- Messages -->
+          <div class="flex-1 overflow-y-auto p-4 space-y-4">
+            ${(t.messages || []).map(m => renderMessage(m)).join('')}
+          </div>
+          
+          <!-- Actions -->
+          <div class="p-4 border-t bg-card">
+            ${canClaim ? `
+              <div class="flex gap-3">
+                <button id="action-claim" class="btn btn-primary flex-1">👋 Claim This Request</button>
+                <button id="action-decline" class="btn btn-secondary">Decline</button>
+              </div>
+            ` : ''}
+            
+            ${needsInput ? `
+              <div class="text-center py-3">
+                <span class="flex items-center justify-center gap-2 text-purple font-medium">
+                  <span>⏳</span> Waiting for input from requestor
+                </span>
+              </div>
+            ` : ''}
+            
+            ${canRespond ? `
+              <div class="space-y-3">
+                ${wantsImage ? '<p class="text-sm text-blue flex items-center gap-2"><span>📷</span> Photo requested</p>' : ''}
+                <div class="flex gap-2">
+                  <input type="text" id="response-text" placeholder="Add response..." class="input flex-1">
+                  <label class="btn btn-ghost border rounded-xl cursor-pointer">
+                    📷
+                    <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden">
+                  </label>
+                </div>
+                <div id="photo-preview" class="hidden">
+                  <img id="photo-img" class="rounded-xl max-h-32 border">
+                  <button id="remove-photo" class="text-red text-sm mt-1">Remove photo</button>
+                </div>
+                <div class="flex gap-2">
+                  <button id="action-complete" class="btn btn-primary flex-1">✓ Complete</button>
+                  <button id="action-more" class="btn btn-secondary">More</button>
+                </div>
+                <div id="more-actions" class="hidden flex gap-2 pt-2 border-t animate-fade">
+                  <button id="action-needs-input" class="flex-1 text-sm py-2 px-4 border-2 border-purple text-purple rounded-xl" style="background:transparent">
+                    Need Info
+                  </button>
+                  <button id="action-failed" class="flex-1 text-sm py-2 px-4 border-2 border-red text-red rounded-xl" style="background:transparent">
+                    Can't Do
+                  </button>
+                </div>
+              </div>
+            ` : ''}
+            
+            ${t.status === 'completed' ? '<p class="text-center text-green font-medium py-3">✓ Completed</p>' : ''}
+            ${['failed', 'declined', 'expired', 'cancelled'].includes(t.status) ? '<p class="text-center text-muted py-3">This thread is closed</p>' : ''}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderMessage(msg) {
+      const isAgent = msg.from?.includes('agent') || msg.from?.includes('claude');
+      const isExchange = msg.from === 'exchange';
+      const content = {};
+      (msg.MESS || []).forEach(item => {
+        const key = Object.keys(item)[0];
+        content[key] = item[key];
+      });
+      
+      const align = isAgent || isExchange ? '' : 'justify-end';
+      const bgClass = isAgent ? 'bg-blue-light' : isExchange ? 'bg-gray-light' : 'bg-mess-light';
+      const icon = isAgent ? '🤖' : isExchange ? '📨' : '👤';
+      
+      return `
+        <div class="animate-slide flex ${align}">
+          <div style="max-width:85%;${isExchange ? 'width:100%' : ''}">
+            <div class="flex items-center gap-2 mb-1">
+              <span>${icon}</span>
+              <span class="text-xs font-medium text-secondary">${msg.from}</span>
+              <span class="text-xs text-muted">${formatTime(msg.received)}</span>
+            </div>
+            <div class="rounded-2xl p-4 ${bgClass} border">
+              ${content.request ? `
+                <p class="font-medium text-primary">${content.request.intent}</p>
+                ${content.request.context ? `<ul class="mt-2 text-sm text-secondary space-y-1">${content.request.context.map(c => `<li class="flex gap-2"><span class="text-muted">•</span> ${c}</li>`).join('')}</ul>` : ''}
+                ${content.request.response_hint ? `<p class="mt-3 text-xs text-muted flex items-center gap-1"><span>📎</span> Wants: ${content.request.response_hint.join(', ')}</p>` : ''}
+              ` : ''}
+              ${content.ack ? `<p class="text-sm text-secondary">✓ Acknowledged as <span class="mono">${content.ack.ref}</span></p>` : ''}
+              ${content.status ? `
+                <p class="font-medium text-primary">Status: ${content.status.code}</p>
+                ${content.status.message ? `<p class="mt-1 text-sm text-secondary">${content.status.message}</p>` : ''}
+              ` : ''}
+              ${content.response ? `
+                ${content.response.content?.map(c => 
+                  typeof c === 'object' && c.image 
+                    ? `<img src="${c.image}" class="rounded-xl border mb-2" style="max-width:100%;max-height:200px">`
+                    : `<div class="whitespace-pre-wrap text-sm text-secondary">${c}</div>`
+                ).join('') || ''}
+                ${content.response.notes ? `<p class="mt-3 text-sm font-medium text-primary border-t pt-3">📝 ${content.response.notes}</p>` : ''}
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderNewRequestModal() {
+      return `
+        <div id="modal-backdrop" class="modal-backdrop animate-fade">
+          <div class="modal card p-6 animate-slide">
+            <h2 class="text-xl font-bold text-primary mb-6">New Request</h2>
+            <div class="space-y-4">
+              <div>
+                <label class="text-sm font-medium text-secondary mb-2" style="display:block">What do you need?</label>
+                <input type="text" id="new-intent" placeholder="e.g., Check if the front door is locked" class="input">
+              </div>
+              <div>
+                <label class="text-sm font-medium text-secondary mb-2" style="display:block">Context (optional)</label>
+                <textarea id="new-context" placeholder="Any helpful details, one per line..." rows="3" class="input" style="resize:none"></textarea>
+              </div>
+              <div class="flex gap-4">
+                <div class="flex-1">
+                  <label class="text-sm font-medium text-secondary mb-2" style="display:block">Priority</label>
+                  <select id="new-priority" class="input">
+                    <option value="background">Background</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="elevated">Elevated</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer" style="padding-top:1.75rem">
+                  <input type="checkbox" id="new-want-image">
+                  <span class="text-sm text-secondary">📷 Want photo</span>
+                </label>
+              </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+              <button id="modal-cancel" class="btn btn-secondary flex-1">Cancel</button>
+              <button id="modal-submit" class="btn btn-primary flex-1">Submit</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ============ Event Bindings ============
+    function bindSetupEvents() {
+      document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
+      document.getElementById('next-step')?.addEventListener('click', () => { state.setupStep++; state.error = null; render(); });
+      document.getElementById('prev-step')?.addEventListener('click', () => { state.setupStep--; state.error = null; state.connectionTest = null; render(); });
+      
+      // Capability chip toggles
+      document.querySelectorAll('.chip[data-cap]').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const checkbox = chip.querySelector('input[type="checkbox"]');
+          if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            chip.classList.toggle('selected', checkbox.checked);
+          }
+        });
+      });
+      
+      document.getElementById('test-connection')?.addEventListener('click', async () => {
+        const token = document.getElementById('input-token').value.trim();
+        const repo = document.getElementById('input-repo').value.trim();
+        if (!token || !repo) { state.error = 'Please enter both token and repository'; render(); return; }
+        const [owner, repoName] = repo.split('/');
+        if (!owner || !repoName) { state.error = 'Repository format: username/repo-name'; render(); return; }
+        
+        state.loading = true; state.error = null; state.connectionTest = null;
+        state.config = { ...state.config, token, repo };
+        render();
+        
+        try {
+          const github = new GitHubExchange(owner, repoName, token);
+          state.connectionTest = await github.testConnection();
+        } catch (e) { state.error = e.message; }
+        state.loading = false;
+        render();
+      });
+      
+      document.getElementById('finish-setup')?.addEventListener('click', async () => {
+        const executorId = document.getElementById('input-executor-id').value.trim();
+        const displayName = document.getElementById('input-display-name').value.trim();
+        const canRequest = document.getElementById('input-can-request').checked;
+        const capabilities = Array.from(document.querySelectorAll('.cap-checkbox:checked')).map(el => el.dataset.cap);
+        
+        if (!executorId) { state.error = 'Please enter an executor name'; render(); return; }
+        
+        state.config = { ...state.config, executorId, displayName: displayName || executorId, canRequest, capabilities };
+        localStorage.setItem('mess-executor-config', JSON.stringify(state.config));
+        
+        const [owner, repo] = state.config.repo.split('/');
+        state.github = new GitHubExchange(owner, repo, state.config.token);
+        
+        state.loading = true; render();
+        try {
+          await state.github.registerExecutor({
+            executor_id: executorId, display_name: displayName || executorId, capabilities,
+            notifications: [], preferences: { min_priority: 'normal', quiet_hours: { enabled: false } }
+          });
+        } catch (e) { console.log('Registration note:', e.message); }
+        
+        state.loading = false; state.view = 'main'; render(); refresh();
+      });
+    }
+
+    function bindSettingsEvents() {
+      document.getElementById('back-to-main')?.addEventListener('click', () => { state.view = 'main'; render(); });
+      document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
+      
+      // Capability chip toggles
+      document.querySelectorAll('.chip[data-cap]').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const checkbox = chip.querySelector('input[type="checkbox"]');
+          if (checkbox) {
+            checkbox.checked = !checkbox.checked;
+            chip.classList.toggle('selected', checkbox.checked);
+          }
+        });
+      });
+      
+      document.getElementById('notif-type')?.addEventListener('change', (e) => {
+        const configEl = document.getElementById('notif-config');
+        if (e.target.value) {
+          configEl.innerHTML = renderNotifConfig(e.target.value);
+          configEl.classList.remove('hidden');
+          bindNotifConfigEvents(e.target.value);
+        } else { configEl.classList.add('hidden'); }
+      });
+      
+      document.querySelectorAll('.remove-notif').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.config.notifications = state.config.notifications || [];
+          state.config.notifications.splice(parseInt(btn.dataset.index), 1);
+          render();
+        });
+      });
+      
+      document.getElementById('settings-quiet-hours')?.addEventListener('change', (e) => {
+        document.getElementById('quiet-hours-config')?.classList.toggle('hidden', !e.target.checked);
+      });
+      
+      document.getElementById('save-settings')?.addEventListener('click', async () => {
+        const capabilities = Array.from(document.querySelectorAll('.settings-cap:checked')).map(el => el.dataset.cap);
+        const quietHoursEnabled = document.getElementById('settings-quiet-hours')?.checked;
+        
+        state.config = {
+          ...state.config,
+          repo: document.getElementById('settings-repo').value.trim(),
+          token: document.getElementById('settings-token').value.trim(),
+          executorId: document.getElementById('settings-executor-id').value.trim(),
+          displayName: document.getElementById('settings-display-name').value.trim(),
+          canRequest: document.getElementById('settings-can-request').checked,
+          capabilities,
+          preferences: {
+            min_priority: document.getElementById('settings-min-priority')?.value || 'normal',
+            quiet_hours: {
+              enabled: quietHoursEnabled,
+              start: document.getElementById('settings-quiet-start')?.value || '22:00',
+              end: document.getElementById('settings-quiet-end')?.value || '07:00',
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+            }
+          }
+        };
+        
+        localStorage.setItem('mess-executor-config', JSON.stringify(state.config));
+        const [owner, repo] = state.config.repo.split('/');
+        state.github = new GitHubExchange(owner, repo, state.config.token);
+        
+        try {
+          await state.github.registerExecutor({
+            executor_id: state.config.executorId, display_name: state.config.displayName,
+            capabilities: state.config.capabilities, notifications: state.config.notifications || [],
+            preferences: state.config.preferences
+          });
+        } catch (e) { console.log('Update note:', e.message); }
+        
+        state.view = 'main'; render(); refresh();
+      });
+      
+      document.getElementById('reset-settings')?.addEventListener('click', () => {
+        if (confirm('This will clear all settings and start over. Continue?')) {
+          localStorage.removeItem('mess-executor-config');
+          state.config = null; state.github = null; state.connectionTest = null;
+          state.view = 'setup'; state.setupStep = 1; render();
+        }
+      });
+    }
+
+    function bindNotifConfigEvents(type) {
+      document.getElementById('add-notif-btn')?.addEventListener('click', () => {
+        state.config.notifications = state.config.notifications || [];
+        let notif = { type };
+        
+        switch (type) {
+          case 'ntfy':
+            notif.topic = document.getElementById('notif-ntfy-topic')?.value;
+            const server = document.getElementById('notif-ntfy-server')?.value;
+            if (server) notif.server = server;
+            if (!notif.topic) return alert('Topic is required');
+            break;
+          case 'google_chat':
+            notif.webhook_url = document.getElementById('notif-gchat-webhook')?.value;
+            if (!notif.webhook_url) return alert('Webhook URL is required');
+            break;
+          case 'gmail':
+            notif.to = document.getElementById('notif-gmail-to')?.value || null;
+            break;
+          case 'slack':
+            notif.webhook_url = document.getElementById('notif-slack-webhook')?.value;
+            if (!notif.webhook_url) return alert('Webhook URL is required');
+            break;
+          case 'pushover':
+            notif.user_key = document.getElementById('notif-pushover-user')?.value;
+            if (!notif.user_key) return alert('User key is required');
+            break;
+          case 'webhook':
+            notif.url = document.getElementById('notif-webhook-url')?.value;
+            if (!notif.url) return alert('Webhook URL is required');
+            break;
+        }
+        
+        state.config.notifications.push(notif);
+        document.getElementById('notif-type').value = '';
+        render();
+      });
+    }
+
+    function bindMainEvents() {
+      document.getElementById('refresh')?.addEventListener('click', refresh);
+      document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
+      document.getElementById('open-settings')?.addEventListener('click', () => { state.view = 'settings'; render(); });
+      document.getElementById('new-request')?.addEventListener('click', () => { state.showNewRequest = true; render(); });
+      
+      document.querySelectorAll('[data-folder]').forEach(tab => {
+        tab.addEventListener('click', () => { state.currentFolder = tab.dataset.folder; state.selectedThread = null; render(); });
+      });
+      
+      document.querySelectorAll('.thread-row').forEach(row => {
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('.quick-claim')) return;
+          state.selectedThread = state.threads[state.currentFolder].find(t => t.ref === row.dataset.ref);
+          render();
+        });
+      });
+      
+      document.querySelectorAll('.quick-claim').forEach(btn => {
+        btn.addEventListener('click', async (e) => { e.stopPropagation(); await handleAction('claim', btn.dataset.ref); });
+      });
+    }
+
+    function bindDetailEvents() {
+      document.getElementById('back')?.addEventListener('click', () => { state.selectedThread = null; render(); });
+      document.getElementById('action-claim')?.addEventListener('click', () => handleAction('claim'));
+      document.getElementById('action-decline')?.addEventListener('click', () => handleAction('decline'));
+      document.getElementById('action-complete')?.addEventListener('click', () => handleAction('complete'));
+      document.getElementById('action-failed')?.addEventListener('click', () => handleAction('failed'));
+      document.getElementById('action-needs-input')?.addEventListener('click', () => handleAction('needs_input'));
+      document.getElementById('action-more')?.addEventListener('click', () => document.getElementById('more-actions')?.classList.toggle('hidden'));
+      
+      document.getElementById('photo-input')?.addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            document.getElementById('photo-img').src = e.target.result;
+            document.getElementById('photo-preview').classList.remove('hidden');
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+      
+      document.getElementById('remove-photo')?.addEventListener('click', () => {
+        document.getElementById('photo-input').value = '';
+        document.getElementById('photo-preview').classList.add('hidden');
+      });
+    }
+
+    function bindNewRequestEvents() {
+      document.getElementById('modal-backdrop')?.addEventListener('click', (e) => {
+        if (e.target.id === 'modal-backdrop') { state.showNewRequest = false; render(); }
+      });
+      document.getElementById('modal-cancel')?.addEventListener('click', () => { state.showNewRequest = false; render(); });
+      
+      document.getElementById('modal-submit')?.addEventListener('click', async () => {
+        const intent = document.getElementById('new-intent').value.trim();
+        if (!intent) return;
+        
+        const context = document.getElementById('new-context').value.split('\n').filter(c => c.trim());
+        const priority = document.getElementById('new-priority').value;
+        const wantImage = document.getElementById('new-want-image').checked;
+        
+        state.loading = true; state.showNewRequest = false; render();
+        
+        try {
+          await state.github.createRequest(state.config.executorId, {
+            intent, context: context.length ? context : undefined, priority,
+            response_hint: wantImage ? ['text', 'image'] : ['text']
+          });
+          await refresh();
+        } catch (e) { console.error(e); alert('Failed to create request: ' + e.message); }
+        
+        state.loading = false; render();
+      });
+    }
+
+    // ============ Actions ============
+    async function refresh() {
+      if (!state.github) return;
+      state.loading = true; render();
+      try { state.threads = await state.github.listThreads(); } catch (e) { console.error('Refresh failed:', e); }
+      state.loading = false; render();
+    }
+
+    async function handleAction(action, refOverride = null) {
+      const thread = refOverride 
+        ? state.threads[state.currentFolder].find(t => t.ref === refOverride)
+        : state.selectedThread;
+      if (!thread) return;
+      
+      state.loading = true; render();
+      
+      try {
+        let mess = [], newStatus = null;
+        const ref = thread.ref;
+        
+        if (action === 'claim') { mess = [{ status: { re: ref, code: 'claimed' } }]; newStatus = 'claimed'; }
+        else if (action === 'complete') {
+          mess = [{ status: { re: ref, code: 'completed' } }];
+          const responseText = document.getElementById('response-text')?.value;
+          const photoImg = document.getElementById('photo-img')?.src;
+          const content = [];
+          if (photoImg && !photoImg.startsWith('about:')) content.push({ image: photoImg });
+          if (responseText) content.push(responseText);
+          if (content.length) mess.push({ response: { re: ref, content } });
+          newStatus = 'completed';
+        }
+        else if (action === 'failed') { mess = [{ status: { re: ref, code: 'failed' } }]; newStatus = 'failed'; }
+        else if (action === 'decline') { mess = [{ status: { re: ref, code: 'declined' } }]; newStatus = 'declined'; }
+        else if (action === 'needs_input') { mess = [{ status: { re: ref, code: 'needs_input', message: 'Need more information' } }]; newStatus = 'needs_input'; }
+        
+        await state.github.updateThread(thread, state.config.executorId, mess, newStatus);
+        state.selectedThread = null;
+        await refresh();
+      } catch (e) { console.error(e); alert('Action failed: ' + e.message); }
+      
+      state.loading = false; render();
+    }
+
+    function formatTime(isoString) {
+      if (!isoString) return '';
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      if (diffMins < 1) return 'just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      return date.toLocaleDateString();
+    }
+
+    init();
+  </script>
+</body>
+</html>

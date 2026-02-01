@@ -1,0 +1,19 @@
+{
+  "name": "mess-mcp-server-github",
+  "version": "1.0.0",
+  "description": "MESS MCP Server with GitHub sync - dispatch physical tasks to human executors",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "mess-mcp-github": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "yaml": "^2.3.4"
+  },
+  "keywords": ["mcp", "mess", "github", "tasks"],
+  "license": "MIT"
+}

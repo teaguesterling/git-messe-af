@@ -1,0 +1,612 @@
+name: MESS Notifications
+
+on:
+  push:
+    paths:
+      - 'exchange/state=received/*.yaml'
+      - 'exchange/state=received/*.yml'
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install js-yaml
+
+      - name: Process notifications
+        env:
+          # Secrets for notification services (configure in repo settings)
+          PUSHOVER_APP_TOKEN: ${{ secrets.PUSHOVER_APP_TOKEN }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
+          GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          node << 'SCRIPT'
+          const fs = require('fs');
+          const path = require('path');
+          const yaml = require('js-yaml');
+          const https = require('https');
+          const http = require('http');
+
+          // ============ Helpers ============
+
+          function httpRequest(url, options, body) {
+            return new Promise((resolve, reject) => {
+              const lib = url.startsWith('https') ? https : http;
+              const req = lib.request(url, options, (res) => {
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => {
+                  if (res.statusCode >= 200 && res.statusCode < 300) {
+                    resolve({ status: res.statusCode, data });
+                  } else {
+                    reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+                  }
+                });
+              });
+              req.on('error', reject);
+              if (body) req.write(body);
+              req.end();
+            });
+          }
+
+          function parseUrl(urlString) {
+            const url = new URL(urlString);
+            return {
+              hostname: url.hostname,
+              port: url.port || (url.protocol === 'https:' ? 443 : 80),
+              path: url.pathname + url.search,
+              protocol: url.protocol
+            };
+          }
+
+          // ============ Notification Senders ============
+
+          async function sendNtfy(config, payload) {
+            const server = config.server || 'https://ntfy.sh';
+            const url = `${server}/${config.topic}`;
+            const priority = { background: '2', normal: '3', elevated: '4', urgent: '5' }[payload.priority] || '3';
+            
+            const parsed = parseUrl(url);
+            await httpRequest(url, {
+              method: 'POST',
+              hostname: parsed.hostname,
+              port: parsed.port,
+              path: parsed.path,
+              headers: {
+                'Content-Type': 'text/plain',
+                'Title': `MESS: ${payload.intent}`,
+                'Priority': priority,
+                'Tags': payload.wants_photo ? 'camera,incoming_envelope' : 'incoming_envelope',
+                'Click': payload.url
+              }
+            }, `${payload.priority.toUpperCase()}: ${payload.intent}\nFrom: ${payload.requestor}\nRef: ${payload.ref}`);
+            
+            console.log(`  ✓ ntfy sent to ${config.topic}`);
+          }
+
+          async function sendSlack(config, payload) {
+            const webhookUrl = config.webhook_url;
+            const parsed = parseUrl(webhookUrl);
+            
+            const message = {
+              text: `New MESS Request: ${payload.intent}`,
+              blocks: [
+                {
+                  type: 'header',
+                  text: { type: 'plain_text', text: `📬 ${payload.intent}` }
+                },
+                {
+                  type: 'section',
+                  fields: [
+                    { type: 'mrkdwn', text: `*Priority:* ${payload.priority}` },
+                    { type: 'mrkdwn', text: `*From:* ${payload.requestor}` },
+                    { type: 'mrkdwn', text: `*Ref:* ${payload.ref}` },
+                    { type: 'mrkdwn', text: `*Photo:* ${payload.wants_photo ? 'Yes 📷' : 'No'}` }
+                  ]
+                },
+                ...(payload.context?.length ? [{
+                  type: 'section',
+                  text: { type: 'mrkdwn', text: `*Context:*\n${payload.context.map(c => `• ${c}`).join('\n')}` }
+                }] : []),
+                {
+                  type: 'actions',
+                  elements: [{
+                    type: 'button',
+                    text: { type: 'plain_text', text: 'View Request' },
+                    url: payload.url
+                  }]
+                }
+              ]
+            };
+            
+            await httpRequest(webhookUrl, {
+              method: 'POST',
+              hostname: parsed.hostname,
+              port: parsed.port,
+              path: parsed.path,
+              headers: { 'Content-Type': 'application/json' }
+            }, JSON.stringify(message));
+            
+            console.log(`  ✓ Slack sent`);
+          }
+
+          async function sendPushover(config, payload) {
+            const appToken = process.env.PUSHOVER_APP_TOKEN;
+            if (!appToken) {
+              console.log(`  ⚠ Pushover: PUSHOVER_APP_TOKEN not set`);
+              return;
+            }
+            
+            const priority = { background: '-1', normal: '0', elevated: '1', urgent: '2' }[payload.priority] || '0';
+            
+            const params = new URLSearchParams({
+              token: appToken,
+              user: config.user_key,
+              title: `MESS: ${payload.intent}`,
+              message: `From: ${payload.requestor}\nRef: ${payload.ref}${payload.context?.length ? '\n\n' + payload.context.join('\n') : ''}`,
+              priority: priority,
+              url: payload.url,
+              url_title: 'View Request'
+            });
+            
+            // Urgent priority requires retry/expire
+            if (priority === '2') {
+              params.append('retry', '60');
+              params.append('expire', '3600');
+            }
+            
+            await httpRequest('https://api.pushover.net/1/messages.json', {
+              method: 'POST',
+              hostname: 'api.pushover.net',
+              path: '/1/messages.json',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            }, params.toString());
+            
+            console.log(`  ✓ Pushover sent to ${config.user_key.slice(0, 8)}...`);
+          }
+
+          async function sendEmail(config, payload) {
+            const apiKey = process.env.SENDGRID_API_KEY;
+            const fromEmail = process.env.SENDGRID_FROM_EMAIL;
+            
+            if (!apiKey || !fromEmail) {
+              console.log(`  ⚠ Email: SENDGRID_API_KEY or SENDGRID_FROM_EMAIL not set`);
+              return;
+            }
+            
+            const message = {
+              personalizations: [{ to: [{ email: config.address }] }],
+              from: { email: fromEmail, name: 'MESS Exchange' },
+              subject: `[MESS ${payload.priority.toUpperCase()}] ${payload.intent}`,
+              content: [{
+                type: 'text/html',
+                value: `
+                  <h2>📬 New MESS Request</h2>
+                  <p><strong>Intent:</strong> ${payload.intent}</p>
+                  <p><strong>Priority:</strong> ${payload.priority}</p>
+                  <p><strong>From:</strong> ${payload.requestor}</p>
+                  <p><strong>Ref:</strong> ${payload.ref}</p>
+                  ${payload.wants_photo ? '<p>📷 <em>Photo requested</em></p>' : ''}
+                  ${payload.context?.length ? `<p><strong>Context:</strong></p><ul>${payload.context.map(c => `<li>${c}</li>`).join('')}</ul>` : ''}
+                  <p><a href="${payload.url}">View Request →</a></p>
+                `
+              }]
+            };
+            
+            await httpRequest('https://api.sendgrid.com/v3/mail/send', {
+              method: 'POST',
+              hostname: 'api.sendgrid.com',
+              path: '/v3/mail/send',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+              }
+            }, JSON.stringify(message));
+            
+            console.log(`  ✓ Email sent to ${config.address}`);
+          }
+
+          async function sendSms(config, payload) {
+            const accountSid = process.env.TWILIO_ACCOUNT_SID;
+            const authToken = process.env.TWILIO_AUTH_TOKEN;
+            const fromNumber = process.env.TWILIO_FROM_NUMBER;
+            
+            if (!accountSid || !authToken || !fromNumber) {
+              console.log(`  ⚠ SMS: Twilio credentials not set`);
+              return;
+            }
+            
+            const message = `MESS [${payload.priority.toUpperCase()}]: ${payload.intent}\nFrom: ${payload.requestor}\nRef: ${payload.ref}`;
+            
+            const params = new URLSearchParams({
+              To: config.phone,
+              From: fromNumber,
+              Body: message
+            });
+            
+            const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+            
+            await httpRequest(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+              method: 'POST',
+              hostname: 'api.twilio.com',
+              path: `/2010-04-01/Accounts/${accountSid}/Messages.json`,
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': `Basic ${auth}`
+              }
+            }, params.toString());
+            
+            console.log(`  ✓ SMS sent to ${config.phone}`);
+          }
+
+          async function sendWebhook(config, payload) {
+            const parsed = parseUrl(config.url);
+            const method = config.method || 'POST';
+            
+            const headers = {
+              'Content-Type': 'application/json',
+              ...(config.headers || {})
+            };
+            
+            await httpRequest(config.url, {
+              method,
+              hostname: parsed.hostname,
+              port: parsed.port,
+              path: parsed.path,
+              headers
+            }, JSON.stringify(payload));
+            
+            console.log(`  ✓ Webhook sent to ${config.url}`);
+          }
+
+          async function sendGoogleChat(config, payload) {
+            const webhookUrl = config.webhook_url;
+            const parsed = parseUrl(webhookUrl);
+            
+            // Google Chat card format
+            const message = {
+              cardsV2: [{
+                cardId: payload.ref,
+                card: {
+                  header: {
+                    title: `📬 MESS Request`,
+                    subtitle: payload.priority.toUpperCase(),
+                    imageUrl: 'https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/mail/default/48px.svg',
+                    imageType: 'CIRCLE'
+                  },
+                  sections: [
+                    {
+                      header: payload.intent,
+                      widgets: [
+                        {
+                          decoratedText: {
+                            topLabel: 'From',
+                            text: payload.requestor
+                          }
+                        },
+                        {
+                          decoratedText: {
+                            topLabel: 'Reference',
+                            text: payload.ref
+                          }
+                        },
+                        ...(payload.wants_photo ? [{
+                          decoratedText: {
+                            topLabel: 'Photo',
+                            text: '📷 Requested'
+                          }
+                        }] : []),
+                        ...(payload.context?.length ? [{
+                          decoratedText: {
+                            topLabel: 'Context',
+                            text: payload.context.join('\n')
+                          }
+                        }] : [])
+                      ]
+                    },
+                    {
+                      widgets: [{
+                        buttonList: {
+                          buttons: [{
+                            text: 'View Request',
+                            onClick: {
+                              openLink: { url: payload.url }
+                            }
+                          }]
+                        }
+                      }]
+                    }
+                  ]
+                }
+              }]
+            };
+            
+            await httpRequest(webhookUrl, {
+              method: 'POST',
+              hostname: parsed.hostname,
+              port: parsed.port,
+              path: parsed.path,
+              headers: { 'Content-Type': 'application/json' }
+            }, JSON.stringify(message));
+            
+            console.log(`  ✓ Google Chat sent`);
+          }
+
+          async function sendGmailSmtp(config, payload) {
+            const net = require('net');
+            const tls = require('tls');
+            
+            const email = config.email || process.env.GMAIL_EMAIL;
+            const appPassword = config.app_password || process.env.GMAIL_APP_PASSWORD;
+            const to = config.to || email; // Default to self
+            
+            if (!email || !appPassword) {
+              console.log(`  ⚠ Gmail: GMAIL_EMAIL or GMAIL_APP_PASSWORD not set`);
+              return;
+            }
+            
+            const subject = `[MESS ${payload.priority.toUpperCase()}] ${payload.intent}`;
+            const body = [
+              `New MESS Request`,
+              ``,
+              `Intent: ${payload.intent}`,
+              `Priority: ${payload.priority}`,
+              `From: ${payload.requestor}`,
+              `Ref: ${payload.ref}`,
+              payload.wants_photo ? `📷 Photo requested` : '',
+              payload.context?.length ? `\nContext:\n${payload.context.map(c => `  • ${c}`).join('\n')}` : '',
+              ``,
+              `View: ${payload.url}`
+            ].filter(Boolean).join('\n');
+            
+            const message = [
+              `From: MESS Exchange <${email}>`,
+              `To: ${to}`,
+              `Subject: ${subject}`,
+              `Content-Type: text/plain; charset=utf-8`,
+              ``,
+              body
+            ].join('\r\n');
+            
+            // Simple SMTP send via TLS
+            return new Promise((resolve, reject) => {
+              const socket = tls.connect(465, 'smtp.gmail.com', () => {
+                let step = 0;
+                const commands = [
+                  null, // Wait for greeting
+                  `EHLO localhost`,
+                  `AUTH LOGIN`,
+                  Buffer.from(email).toString('base64'),
+                  Buffer.from(appPassword).toString('base64'),
+                  `MAIL FROM:<${email}>`,
+                  `RCPT TO:<${to}>`,
+                  `DATA`,
+                  message + '\r\n.',
+                  `QUIT`
+                ];
+                
+                socket.on('data', (data) => {
+                  const response = data.toString();
+                  const code = parseInt(response.slice(0, 3));
+                  
+                  if (code >= 400) {
+                    socket.destroy();
+                    reject(new Error(`SMTP error: ${response.trim()}`));
+                    return;
+                  }
+                  
+                  step++;
+                  if (step < commands.length && commands[step]) {
+                    socket.write(commands[step] + '\r\n');
+                  } else if (step >= commands.length) {
+                    socket.end();
+                    resolve();
+                  }
+                });
+                
+                socket.on('error', reject);
+              });
+            });
+            
+            console.log(`  ✓ Gmail sent to ${to}`);
+          }
+
+          // ============ Main Logic ============
+
+          async function main() {
+            // Find new request files
+            const { execSync } = require('child_process');
+            let newFiles = [];
+            
+            try {
+              const diff = execSync('git diff --name-only --diff-filter=A HEAD~1 HEAD -- "exchange/state=received/"', { encoding: 'utf-8' });
+              newFiles = diff.trim().split('\n').filter(f => f && (f.endsWith('.yaml') || f.endsWith('.yml')));
+            } catch (e) {
+              console.log('No previous commit or no new files');
+              return;
+            }
+            
+            if (newFiles.length === 0) {
+              console.log('No new request files');
+              return;
+            }
+            
+            console.log(`Found ${newFiles.length} new request(s)`);
+            
+            // Load all executor configs
+            const executorsDir = 'executors';
+            const executors = [];
+            
+            if (fs.existsSync(executorsDir)) {
+              const files = fs.readdirSync(executorsDir).filter(f => 
+                (f.endsWith('.yaml') || f.endsWith('.yml')) && !f.startsWith('_') && f !== 'README.md'
+              );
+              
+              for (const file of files) {
+                try {
+                  const content = fs.readFileSync(path.join(executorsDir, file), 'utf-8');
+                  const config = yaml.load(content);
+                  if (config.executor_id && config.notifications?.length) {
+                    executors.push(config);
+                  }
+                } catch (e) {
+                  console.error(`Failed to load executor ${file}:`, e.message);
+                }
+              }
+            }
+            
+            console.log(`Loaded ${executors.length} executor config(s)`);
+            
+            if (executors.length === 0) {
+              console.log('No executors configured for notifications');
+              return;
+            }
+            
+            // Process each new request
+            for (const file of newFiles) {
+              console.log(`\nProcessing: ${file}`);
+              
+              try {
+                const content = fs.readFileSync(file, 'utf-8');
+                const docs = content.split(/^---$/m).filter(d => d.trim());
+                const envelope = yaml.load(docs[0]);
+                
+                // Parse first message for request details
+                let request = {};
+                if (docs.length > 1) {
+                  const firstMsg = yaml.load(docs[1]);
+                  const messItems = firstMsg.MESS || [];
+                  for (const item of messItems) {
+                    if (item.request) request = item.request;
+                  }
+                }
+                
+                const payload = {
+                  ref: envelope.ref,
+                  intent: envelope.intent || request.intent || 'New request',
+                  priority: envelope.priority || request.priority || 'normal',
+                  requestor: envelope.requestor,
+                  created: envelope.created,
+                  context: request.context || [],
+                  wants_photo: request.response_hint?.includes('image') || false,
+                  required_capabilities: request.required_capabilities || [],
+                  url: `https://github.com/${process.env.GITHUB_REPO}/blob/main/${file}`
+                };
+                
+                console.log(`  Intent: ${payload.intent}`);
+                console.log(`  Priority: ${payload.priority}`);
+                
+                // Notify matching executors
+                for (const executor of executors) {
+                  console.log(`\n  Checking executor: ${executor.executor_id}`);
+                  
+                  // Check capability match (if request specifies required capabilities)
+                  if (payload.required_capabilities.length > 0) {
+                    const execCaps = executor.capabilities || [];
+                    const hasRequired = payload.required_capabilities.every(cap => execCaps.includes(cap));
+                    if (!hasRequired) {
+                      console.log(`    ⏭ Skipping: missing required capabilities`);
+                      continue;
+                    }
+                  }
+                  
+                  // Check priority preference
+                  const prefs = executor.preferences || {};
+                  const minPriority = prefs.min_priority || 'background';
+                  const priorityOrder = ['background', 'normal', 'elevated', 'urgent'];
+                  const requestPriorityIndex = priorityOrder.indexOf(payload.priority);
+                  const minPriorityIndex = priorityOrder.indexOf(minPriority);
+                  
+                  if (requestPriorityIndex < minPriorityIndex) {
+                    console.log(`    ⏭ Skipping: priority ${payload.priority} below minimum ${minPriority}`);
+                    continue;
+                  }
+                  
+                  // Check quiet hours
+                  if (prefs.quiet_hours?.enabled) {
+                    const tz = prefs.quiet_hours.timezone || 'UTC';
+                    const now = new Date();
+                    const formatter = new Intl.DateTimeFormat('en-US', { 
+                      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz 
+                    });
+                    const currentTime = formatter.format(now);
+                    const start = prefs.quiet_hours.start || '22:00';
+                    const end = prefs.quiet_hours.end || '07:00';
+                    
+                    // Simple quiet hours check (doesn't handle day boundary perfectly but works for most cases)
+                    const inQuietHours = start > end 
+                      ? (currentTime >= start || currentTime < end)
+                      : (currentTime >= start && currentTime < end);
+                    
+                    if (inQuietHours && payload.priority !== 'urgent') {
+                      console.log(`    ⏭ Skipping: quiet hours (${start}-${end} ${tz})`);
+                      continue;
+                    }
+                  }
+                  
+                  // Send notifications
+                  for (const notif of executor.notifications) {
+                    try {
+                      switch (notif.type) {
+                        case 'ntfy':
+                          await sendNtfy(notif, payload);
+                          break;
+                        case 'slack':
+                          await sendSlack(notif, payload);
+                          break;
+                        case 'google_chat':
+                          await sendGoogleChat(notif, payload);
+                          break;
+                        case 'pushover':
+                          await sendPushover(notif, payload);
+                          break;
+                        case 'email':
+                          await sendEmail(notif, payload);
+                          break;
+                        case 'gmail':
+                          await sendGmailSmtp(notif, payload);
+                          break;
+                        case 'sms':
+                          await sendSms(notif, payload);
+                          break;
+                        case 'webhook':
+                          await sendWebhook(notif, payload);
+                          break;
+                        default:
+                          console.log(`    ⚠ Unknown notification type: ${notif.type}`);
+                      }
+                    } catch (e) {
+                      console.error(`    ✗ ${notif.type} failed: ${e.message}`);
+                    }
+                  }
+                }
+                
+              } catch (e) {
+                console.error(`  Error processing ${file}:`, e.message);
+              }
+            }
+            
+            console.log('\n✓ Notification processing complete');
+          }
+
+          main().catch(e => {
+            console.error('Fatal error:', e);
+            process.exit(1);
+          });
+          SCRIPT

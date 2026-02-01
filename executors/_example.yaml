@@ -1,0 +1,28 @@
+# Example executor registration
+# Copy this file and rename to your executor ID
+
+executor_id: example-phone
+display_name: "Example Phone"
+
+capabilities:
+  - check:visual
+  - photo:capture
+  - fetch:indoor
+  - operate:appliance
+
+notifications:
+  # Uncomment and configure the channels you want
+  
+  # - type: ntfy
+  #   topic: my-secret-topic
+  
+  # - type: email
+  #   address: me@example.com
+  
+  # - type: slack
+  #   webhook_url: https://hooks.slack.com/services/xxx
+
+preferences:
+  min_priority: normal
+  quiet_hours:
+    enabled: false
