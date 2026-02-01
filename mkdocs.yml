@@ -3,7 +3,7 @@ site_description: Dispatch physical-world tasks from AI agents to human executor
 site_url: https://mess.readthedocs.io
 
 repo_name: git-messe-af
-repo_url: https://github.com/teague/git-messe-af
+repo_url: https://github.com/teaguesterling/git-messe-af
 
 theme:
   name: material

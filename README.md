@@ -4,6 +4,8 @@
 
 Dispatch physical-world tasks from AI agents to human executors using GitHub as the backend.
 
+**[Try the Client](https://teaguesterling.github.io/git-messe-af/)** | [Documentation](https://mess.readthedocs.io)
+
 ## Architecture
 
 ```
@@ -35,7 +37,7 @@ Dispatch physical-world tasks from AI agents to human executors using GitHub as 
 
 This repository is a **template**. Click the button below to create your own MESS exchange:
 
-[![Use this template](https://img.shields.io/badge/Use%20this%20template-238636?style=for-the-badge&logo=github&logoColor=white)](https://github.com/teague/git-messe-af/generate)
+[![Use this template](https://img.shields.io/badge/Use%20this%20template-238636?style=for-the-badge&logo=github&logoColor=white)](https://github.com/teaguesterling/git-messe-af/generate)
 
 Or manually:
 

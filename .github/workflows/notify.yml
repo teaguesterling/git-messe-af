@@ -5,6 +5,13 @@ on:
     paths:
       - 'exchange/state=received/*.yaml'
       - 'exchange/state=received/*.yml'
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Run in test mode (no actual notifications)'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   notify:

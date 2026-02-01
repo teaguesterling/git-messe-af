@@ -49,7 +49,7 @@ MESS enables AI agents (like Claude) to request actions in the physical world:
 
 This repository is a **template**. Use it to create your own MESS exchange:
 
-1. Go to [github.com/teague/git-messe-af](https://github.com/teague/git-messe-af)
+1. Go to [github.com/teague/git-messe-af](https://github.com/teaguesterling/git-messe-af)
 2. Click the green **"Use this template"** button
 3. Select **"Create a new repository"**
 4. Name your repository (e.g., `mess-exchange`)
