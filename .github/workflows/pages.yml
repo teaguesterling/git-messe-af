@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - 'client/**'
+      - 'SKILL.md'
+      - 'mcp/SKILL.md'
+      - 'server/SKILL.md'
   workflow_dispatch:
 
 permissions:
@@ -26,6 +29,14 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
+
+      - name: Copy SKILL files to client directory
+        run: |
+          mkdir -p client/skills
+          cp SKILL.md client/skills/overview.md
+          cp mcp/SKILL.md client/skills/mcp.md
+          cp server/SKILL.md client/skills/server.md
+          cp client/SKILL.md client/skills/client.md
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

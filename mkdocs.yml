@@ -44,6 +44,11 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Skills:
+    - Overview: skill-overview.md
+    - MCP Server: skill-mcp.md
+    - Exchange Server API: skill-server.md
+    - Web Client: skill-client.md
   - Protocol:
     - MESS Protocol v1: mess-protocol-v1.md
     - MESSE-AF Format: messe-af-v1.md
