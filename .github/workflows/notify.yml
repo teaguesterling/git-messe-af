@@ -42,6 +42,10 @@ jobs:
           GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           GITHUB_REPO: ${{ github.repository }}
+          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
+          # Client URL - set CLIENT_URL secret to override the default GitHub Pages URL
+          CLIENT_URL: ${{ secrets.CLIENT_URL }}
         run: |
           node << 'SCRIPT'
           const fs = require('fs');
@@ -504,6 +508,10 @@ jobs:
                   }
                 }
                 
+                // Build client URL - use CLIENT_URL secret if set, otherwise default to GitHub Pages
+                const clientUrl = process.env.CLIENT_URL ||
+                  `https://${process.env.GITHUB_REPO_OWNER}.github.io/${process.env.GITHUB_REPO_NAME}/`;
+
                 const payload = {
                   ref: envelope.ref,
                   intent: envelope.intent || request.intent || 'New request',
@@ -513,7 +521,7 @@ jobs:
                   context: request.context || [],
                   wants_photo: request.response_hint?.includes('image') || false,
                   required_capabilities: request.required_capabilities || [],
-                  url: `https://github.com/${process.env.GITHUB_REPO}/blob/main/${file}`
+                  url: clientUrl
                 };
                 
                 console.log(`  Intent: ${payload.intent}`);

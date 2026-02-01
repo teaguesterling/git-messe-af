@@ -478,6 +478,7 @@
         if (newStatus && newStatus !== envelope.status) {
           envelope.status = newStatus;
           envelope.updated = now;
+          if (!envelope.history) envelope.history = [];
           envelope.history.push({ action: newStatus, at: now, by: from });
           if (newStatus === 'claimed') envelope.executor = from;
         }
