@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
  * MESS MCP Server with GitHub Sync
- * 
+ *
  * Modes:
- * - Local only: MESS_DIR=~/.mess
+ * - Local only: MESS_DIR (defaults to ../exchange relative to this script)
  * - GitHub sync: MESS_GITHUB_REPO=user/repo MESS_GITHUB_TOKEN=ghp_xxx
  * - GitHub only: MESS_GITHUB_REPO + MESS_GITHUB_ONLY=true
- * 
+ *
+ * Storage uses Hive partitioning: exchange/state=received/, exchange/state=executing/, etc.
  * With sync enabled, local changes push to GitHub, and periodically pulls.
  */
 
@@ -18,7 +19,8 @@ import * as path from 'path';
 import YAML from 'yaml';
 
 // Config
-const MESS_DIR = process.env.MESS_DIR || path.join(process.env.HOME, '.mess');
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
+const MESS_DIR = process.env.MESS_DIR || path.join(__dirname, '..', 'exchange');
 const GITHUB_REPO = process.env.MESS_GITHUB_REPO; // format: owner/repo
 const GITHUB_TOKEN = process.env.MESS_GITHUB_TOKEN;
 const GITHUB_ONLY = process.env.MESS_GITHUB_ONLY === 'true';
@@ -66,7 +68,7 @@ class GitHubAPI {
       const content = Buffer.from(data.content, 'base64').toString('utf-8');
       return { content, sha: data.sha };
     } catch (e) {
-      if (e.message.includes('404')) return null;
+      if (e.message.includes('404') || e.message.includes('Not Found')) return null;
       throw e;
     }
   }
@@ -85,10 +87,10 @@ class GitHubAPI {
 
   async listFolder(folder) {
     try {
-      const data = await this.request(`/contents/exchange/${folder}`);
+      const data = await this.request(`/contents/exchange/state=${folder}`);
       return data.filter(f => f.name.endsWith('.messe-af.yaml'));
     } catch (e) {
-      if (e.message.includes('404')) return [];
+      if (e.message.includes('404') || e.message.includes('Not Found')) return [];
       throw e;
     }
   }
@@ -98,6 +100,47 @@ class GitHubAPI {
       method: 'DELETE',
       body: JSON.stringify({ message, sha })
     });
+  }
+
+  // Atomic move: delete old path + create new path in single commit
+  async moveFile(oldPath, newPath, content, message) {
+    // Get current main branch ref
+    const refData = await this.request('/git/ref/heads/main');
+    const currentCommitSha = refData.object.sha;
+
+    // Get current commit's tree
+    const commitData = await this.request(`/git/commits/${currentCommitSha}`);
+    const baseTreeSha = commitData.tree.sha;
+
+    // Create new tree with deletion + addition
+    const treeData = await this.request('/git/trees', {
+      method: 'POST',
+      body: JSON.stringify({
+        base_tree: baseTreeSha,
+        tree: [
+          { path: oldPath, mode: '100644', type: 'blob', sha: null }, // delete
+          { path: newPath, mode: '100644', type: 'blob', content }    // create
+        ]
+      })
+    });
+
+    // Create commit
+    const newCommit = await this.request('/git/commits', {
+      method: 'POST',
+      body: JSON.stringify({
+        message,
+        tree: treeData.sha,
+        parents: [currentCommitSha]
+      })
+    });
+
+    // Update ref
+    await this.request('/git/refs/heads/main', {
+      method: 'PATCH',
+      body: JSON.stringify({ sha: newCommit.sha })
+    });
+
+    return newCommit;
   }
 }
 
@@ -111,7 +154,7 @@ if (GITHUB_REPO && GITHUB_TOKEN) {
 async function ensureDirs() {
   if (GITHUB_ONLY) return;
   for (const dir of ['received', 'executing', 'finished', 'canceled']) {
-    await fs.mkdir(path.join(MESS_DIR, dir), { recursive: true });
+    await fs.mkdir(path.join(MESS_DIR, `state=${dir}`), { recursive: true });
   }
 }
 
@@ -124,7 +167,7 @@ async function generateRef() {
   if (!GITHUB_ONLY) {
     try {
       for (const folder of ['received', 'executing', 'finished', 'canceled']) {
-        const files = await fs.readdir(path.join(MESS_DIR, folder)).catch(() => []);
+        const files = await fs.readdir(path.join(MESS_DIR, `state=${folder}`)).catch(() => []);
         for (const f of files) {
           if (f.startsWith(today)) {
             const num = parseInt(f.split('-')[3]?.split('.')[0] || '0');
@@ -163,7 +206,7 @@ async function findThread(ref) {
   // Check local first
   if (!GITHUB_ONLY) {
     for (const folder of ['received', 'executing', 'finished', 'canceled']) {
-      const filePath = path.join(MESS_DIR, folder, `${ref}.messe-af.yaml`);
+      const filePath = path.join(MESS_DIR, `state=${folder}`, `${ref}.messe-af.yaml`);
       try {
         await fs.access(filePath);
         const content = await fs.readFile(filePath, 'utf-8');
@@ -175,7 +218,7 @@ async function findThread(ref) {
   // Check GitHub
   if (github) {
     for (const folder of ['received', 'executing', 'finished', 'canceled']) {
-      const ghPath = `exchange/${folder}/${ref}.messe-af.yaml`;
+      const ghPath = `exchange/state=${folder}/${ref}.messe-af.yaml`;
       const result = await github.getFile(ghPath);
       if (result) {
         return { folder, ghPath, content: result.content, sha: result.sha, source: 'github' };
@@ -213,14 +256,14 @@ async function createRequest(from, request) {
   
   // Write locally
   if (!GITHUB_ONLY) {
-    const filePath = path.join(MESS_DIR, 'received', `${ref}.messe-af.yaml`);
+    const filePath = path.join(MESS_DIR, 'state=received', `${ref}.messe-af.yaml`);
     await fs.writeFile(filePath, content);
   }
   
   // Push to GitHub
   if (github) {
     const ghPath = `exchange/state=received/${ref}.messe-af.yaml`;
-    await github.putFile(ghPath, content, `New request: ${request.intent}`);
+    await github.putFile(ghPath, content, `${ref}: New request`);
   }
   
   return { ref, status: 'pending', message: `Request created: ${ref}` };
@@ -257,7 +300,7 @@ async function updateThread(ref, from, mess, newStatus = null) {
   // Update local
   if (!GITHUB_ONLY && found.source === 'local') {
     if (oldFolder !== newFolder) {
-      const newPath = path.join(MESS_DIR, newFolder, `${ref}.messe-af.yaml`);
+      const newPath = path.join(MESS_DIR, `state=${newFolder}`, `${ref}.messe-af.yaml`);
       await fs.writeFile(newPath, content);
       await fs.unlink(found.filePath);
     } else {
@@ -267,20 +310,19 @@ async function updateThread(ref, from, mess, newStatus = null) {
   
   // Update GitHub
   if (github) {
-    const newGhPath = `exchange/${newFolder}/${ref}.messe-af.yaml`;
-    
+    const newGhPath = `exchange/state=${newFolder}/${ref}.messe-af.yaml`;
+
     if (found.source === 'github') {
       if (oldFolder !== newFolder) {
-        // Move: create new, delete old
-        await github.putFile(newGhPath, content, `${newStatus || 'Update'}: ${envelope.intent}`);
-        await github.deleteFile(found.ghPath, found.sha, `Move to ${newFolder}`);
+        // Atomic move: delete old + create new in single commit
+        await github.moveFile(found.ghPath, newGhPath, content, `${ref}: ${newStatus || 'Update'}`);
       } else {
-        await github.putFile(found.ghPath, content, `Update: ${envelope.intent}`, found.sha);
+        await github.putFile(found.ghPath, content, `${ref}: ${newStatus || 'Update'}`, found.sha);
       }
     } else {
       // Local source, push to GitHub
       const existing = await github.getFile(newGhPath);
-      await github.putFile(newGhPath, content, `Sync: ${envelope.intent}`, existing?.sha);
+      await github.putFile(newGhPath, content, `${ref}: Sync`, existing?.sha);
     }
   }
   
@@ -303,10 +345,10 @@ async function getStatus(ref) {
     // Local
     if (!GITHUB_ONLY) {
       try {
-        const files = await fs.readdir(path.join(MESS_DIR, folder));
+        const files = await fs.readdir(path.join(MESS_DIR, `state=${folder}`));
         for (const f of files) {
           if (f.endsWith('.messe-af.yaml')) {
-            const content = await fs.readFile(path.join(MESS_DIR, folder, f), 'utf-8');
+            const content = await fs.readFile(path.join(MESS_DIR, `state=${folder}`, f), 'utf-8');
             const { envelope } = parseThread(content);
             results.push({ ...envelope, folder, source: 'local' });
           }
@@ -320,7 +362,7 @@ async function getStatus(ref) {
       for (const f of files) {
         const ref = f.name.replace('.messe-af.yaml', '');
         if (!results.some(r => r.ref === ref)) {
-          const result = await github.getFile(`exchange/${folder}/${f.name}`);
+          const result = await github.getFile(`exchange/state=${folder}/${f.name}`);
           if (result) {
             const { envelope } = parseThread(result.content);
             results.push({ ...envelope, folder, source: 'github' });
