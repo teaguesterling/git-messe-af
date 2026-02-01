@@ -647,7 +647,13 @@
       connectionTest: null,
       showNewRequest: false,
       // Track recently modified threads to preserve during refresh
-      recentlyModified: new Map() // ref -> { folder, thread, expires }
+      recentlyModified: new Map(), // ref -> { folder, thread, expires }
+      // Pending attachments for response
+      pendingLocation: null,
+      pendingAudio: null,
+      pendingFile: null,
+      audioRecorder: null,
+      audioTimer: null
     };
 
     function init() {
@@ -1312,14 +1318,51 @@
                 ${wantsImage ? '<p class="text-sm text-blue flex items-center gap-2"><span>📷</span> Photo requested</p>' : ''}
                 <div class="flex gap-2">
                   <input type="text" id="response-text" placeholder="Add response..." class="input flex-1">
-                  <label class="btn btn-ghost border rounded-xl cursor-pointer">
+                  <label class="btn btn-ghost border rounded-xl cursor-pointer" title="Add photo">
                     📷
                     <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden">
                   </label>
+                  <button id="location-btn" class="btn btn-ghost border rounded-xl" title="Add location">📍</button>
+                  <button id="audio-btn" class="btn btn-ghost border rounded-xl" title="Record audio">🎤</button>
+                  <label class="btn btn-ghost border rounded-xl cursor-pointer" title="Attach file">
+                    📎
+                    <input type="file" id="file-input" class="hidden">
+                  </label>
                 </div>
-                <div id="photo-preview" class="hidden">
+                <div id="photo-preview" class="hidden animate-fade">
                   <img id="photo-img" class="rounded-xl max-h-32 border">
                   <button id="remove-photo" class="text-red text-sm mt-1">Remove photo</button>
+                </div>
+                <div id="location-preview" class="hidden animate-fade p-3 bg-hover rounded-xl">
+                  <div class="flex items-center gap-2">
+                    <span>📍</span>
+                    <span id="location-text" class="text-sm flex-1"></span>
+                    <button id="remove-location" class="text-red text-sm">Remove</button>
+                  </div>
+                </div>
+                <div id="audio-preview" class="hidden animate-fade p-3 bg-hover rounded-xl">
+                  <div class="flex items-center gap-2">
+                    <span>🎤</span>
+                    <audio id="audio-player" controls class="flex-1 h-8"></audio>
+                    <button id="remove-audio" class="text-red text-sm">Remove</button>
+                  </div>
+                </div>
+                <div id="audio-recording" class="hidden animate-fade p-3 bg-red-light rounded-xl">
+                  <div class="flex items-center gap-2">
+                    <span class="loading">🔴</span>
+                    <span class="text-sm flex-1">Recording... <span id="audio-duration">0:00</span></span>
+                    <button id="stop-audio" class="btn btn-sm btn-secondary">Stop</button>
+                  </div>
+                </div>
+                <div id="file-preview" class="hidden animate-fade p-3 bg-hover rounded-xl">
+                  <div class="flex items-center gap-2">
+                    <span id="file-icon">📄</span>
+                    <div class="flex-1 min-w-0">
+                      <div id="file-name" class="text-sm font-medium truncate"></div>
+                      <div id="file-meta" class="text-xs text-muted"></div>
+                    </div>
+                    <button id="remove-file" class="text-red text-sm">Remove</button>
+                  </div>
                 </div>
                 <div class="flex gap-2">
                   <button id="action-complete" class="btn btn-primary flex-1">✓ Complete</button>
@@ -1376,11 +1419,38 @@
                 ${content.status.message ? `<p class="mt-1 text-sm text-secondary">${content.status.message}</p>` : ''}
               ` : ''}
               ${content.response ? `
-                ${content.response.content?.map(c => 
-                  typeof c === 'object' && c.image 
-                    ? `<img src="${c.image}" class="rounded-xl border mb-2" style="max-width:100%;max-height:200px">`
-                    : `<div class="whitespace-pre-wrap text-sm text-secondary">${c}</div>`
-                ).join('') || ''}
+                ${content.response.content?.map(c => {
+                  if (typeof c === 'object' && c.image) {
+                    return `<img src="${c.image}" class="rounded-xl border mb-2" style="max-width:100%;max-height:200px">`;
+                  } else if (typeof c === 'object' && c.location) {
+                    const loc = c.location;
+                    const mapsUrl = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
+                    return `<div class="flex items-center gap-2 p-2 bg-hover rounded-lg mb-2">
+                      <span>📍</span>
+                      <a href="${mapsUrl}" target="_blank" class="text-sm text-blue hover:underline">
+                        ${loc.lat.toFixed(6)}, ${loc.lng.toFixed(6)}
+                      </a>
+                      <span class="text-xs text-muted">(±${loc.accuracy}m)</span>
+                    </div>`;
+                  } else if (typeof c === 'object' && c.audio) {
+                    return `<div class="mb-2">
+                      <audio controls src="${c.audio}" class="w-full h-10"></audio>
+                    </div>`;
+                  } else if (typeof c === 'object' && c.file) {
+                    const f = c.file;
+                    const icon = typeof getFileIcon === 'function' ? getFileIcon(f.type) : '📄';
+                    return `<div class="flex items-center gap-2 p-2 bg-hover rounded-lg mb-2">
+                      <span>${icon}</span>
+                      <div class="flex-1 min-w-0">
+                        <a href="${f.data}" download="${f.name}" class="text-sm text-blue hover:underline truncate block">${f.name}</a>
+                        <span class="text-xs text-muted">${f.type} · ${typeof formatFileSize === 'function' ? formatFileSize(f.size) : f.size + ' bytes'}</span>
+                      </div>
+                    </div>`;
+                  } else if (typeof c === 'string') {
+                    return `<div class="whitespace-pre-wrap text-sm text-secondary">${c}</div>`;
+                  }
+                  return '';
+                }).join('') || ''}
                 ${content.response.notes ? `<p class="mt-3 text-sm font-medium text-primary border-t pt-3">📝 ${content.response.notes}</p>` : ''}
               ` : ''}
             </div>
@@ -1662,6 +1732,188 @@
         document.getElementById('photo-input').value = '';
         document.getElementById('photo-preview').classList.add('hidden');
       });
+
+      // Location capture
+      document.getElementById('location-btn')?.addEventListener('click', async () => {
+        if (!navigator.geolocation) {
+          alert('Geolocation is not supported by your browser');
+          return;
+        }
+
+        const btn = document.getElementById('location-btn');
+        btn.disabled = true;
+        btn.textContent = '⏳';
+
+        try {
+          const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 10000,
+              maximumAge: 60000
+            });
+          });
+
+          state.pendingLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: Math.round(position.coords.accuracy),
+            timestamp: new Date().toISOString()
+          };
+
+          document.getElementById('location-text').textContent =
+            `${state.pendingLocation.lat.toFixed(6)}, ${state.pendingLocation.lng.toFixed(6)} (±${state.pendingLocation.accuracy}m)`;
+          document.getElementById('location-preview').classList.remove('hidden');
+        } catch (err) {
+          console.error('Location error:', err);
+          alert('Failed to get location: ' + err.message);
+        }
+
+        btn.disabled = false;
+        btn.textContent = '📍';
+      });
+
+      document.getElementById('remove-location')?.addEventListener('click', () => {
+        state.pendingLocation = null;
+        document.getElementById('location-preview').classList.add('hidden');
+      });
+
+      // Audio recording
+      document.getElementById('audio-btn')?.addEventListener('click', async () => {
+        if (state.audioRecorder) {
+          // Already recording - stop it
+          state.audioRecorder.stop();
+          return;
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+          const chunks = [];
+
+          mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+
+          mediaRecorder.onstop = async () => {
+            stream.getTracks().forEach(track => track.stop());
+            state.audioRecorder = null;
+            clearInterval(state.audioTimer);
+            document.getElementById('audio-recording').classList.add('hidden');
+            document.getElementById('audio-btn').textContent = '🎤';
+
+            const blob = new Blob(chunks, { type: 'audio/webm' });
+
+            // Convert to base64
+            const reader = new FileReader();
+            reader.onload = () => {
+              state.pendingAudio = reader.result;
+              document.getElementById('audio-player').src = reader.result;
+              document.getElementById('audio-preview').classList.remove('hidden');
+            };
+            reader.readAsDataURL(blob);
+          };
+
+          state.audioRecorder = mediaRecorder;
+          mediaRecorder.start();
+
+          // Show recording UI
+          document.getElementById('audio-recording').classList.remove('hidden');
+          document.getElementById('audio-btn').textContent = '⏹️';
+
+          // Duration timer
+          let seconds = 0;
+          state.audioTimer = setInterval(() => {
+            seconds++;
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            document.getElementById('audio-duration').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+            // Auto-stop at 60 seconds
+            if (seconds >= 60) {
+              mediaRecorder.stop();
+            }
+          }, 1000);
+
+        } catch (err) {
+          console.error('Audio recording error:', err);
+          alert('Failed to start recording: ' + err.message);
+        }
+      });
+
+      document.getElementById('stop-audio')?.addEventListener('click', () => {
+        if (state.audioRecorder) {
+          state.audioRecorder.stop();
+        }
+      });
+
+      document.getElementById('remove-audio')?.addEventListener('click', () => {
+        state.pendingAudio = null;
+        document.getElementById('audio-preview').classList.add('hidden');
+      });
+
+      // File attachment
+      document.getElementById('file-input')?.addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        // Check file size (max 500KB for inline)
+        const FILE_MAX_BYTES = 500000;
+        if (file.size > FILE_MAX_BYTES) {
+          alert(`File too large. Maximum size is ${Math.round(FILE_MAX_BYTES / 1024)}KB. Your file is ${Math.round(file.size / 1024)}KB.`);
+          e.target.value = '';
+          return;
+        }
+
+        try {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+          });
+
+          state.pendingFile = {
+            name: file.name,
+            type: file.type || 'application/octet-stream',
+            size: file.size,
+            data: dataUrl
+          };
+
+          // Update preview
+          const icon = getFileIcon(file.type);
+          document.getElementById('file-icon').textContent = icon;
+          document.getElementById('file-name').textContent = file.name;
+          document.getElementById('file-meta').textContent = `${file.type || 'Unknown type'} · ${formatFileSize(file.size)}`;
+          document.getElementById('file-preview').classList.remove('hidden');
+        } catch (err) {
+          console.error('File read error:', err);
+          alert('Failed to read file');
+        }
+      });
+
+      document.getElementById('remove-file')?.addEventListener('click', () => {
+        state.pendingFile = null;
+        document.getElementById('file-input').value = '';
+        document.getElementById('file-preview').classList.add('hidden');
+      });
+    }
+
+    function getFileIcon(mimeType) {
+      if (!mimeType) return '📄';
+      if (mimeType.startsWith('image/')) return '🖼️';
+      if (mimeType.startsWith('video/')) return '🎬';
+      if (mimeType.startsWith('audio/')) return '🎵';
+      if (mimeType.startsWith('text/')) return '📝';
+      if (mimeType.includes('pdf')) return '📕';
+      if (mimeType.includes('zip') || mimeType.includes('compressed')) return '🗜️';
+      if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return '📊';
+      if (mimeType.includes('document') || mimeType.includes('word')) return '📘';
+      if (mimeType.includes('presentation') || mimeType.includes('powerpoint')) return '📙';
+      return '📄';
+    }
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
 
     function bindNewRequestEvents() {
@@ -1776,9 +2028,17 @@
         : state.selectedThread;
       if (!thread) return;
 
-      // Capture form values BEFORE render() replaces the DOM
+      // Capture form values and pending attachments BEFORE render() clears them
       const responseText = document.getElementById('response-text')?.value;
       const photoImg = document.getElementById('photo-img')?.src;
+      const pendingLocation = state.pendingLocation;
+      const pendingAudio = state.pendingAudio;
+      const pendingFile = state.pendingFile;
+
+      // Clear pending attachments
+      state.pendingLocation = null;
+      state.pendingAudio = null;
+      state.pendingFile = null;
 
       // Determine state transition
       let mess = [], newStatus = null;
@@ -1789,6 +2049,9 @@
         mess = [{ status: { re: ref, code: 'completed' } }];
         const content = [];
         if (photoImg && !photoImg.startsWith('about:')) content.push({ image: photoImg });
+        if (pendingLocation) content.push({ location: pendingLocation });
+        if (pendingAudio) content.push({ audio: pendingAudio });
+        if (pendingFile) content.push({ file: pendingFile });
         if (responseText) content.push(responseText);
         if (content.length) mess.push({ response: { re: ref, content } });
         newStatus = 'completed';

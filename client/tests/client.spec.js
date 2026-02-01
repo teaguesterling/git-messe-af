@@ -782,3 +782,251 @@ test.describe('Photo Capture', () => {
     expect(result.compressedSize).toBeLessThan(50000);
   });
 });
+
+test.describe('Location Attachment', () => {
+  test('shows location button on claimed threads', async ({ page }) => {
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    await page.click('button:has-text("Active")');
+    await page.click('.thread-row');
+
+    await expect(page.locator('#location-btn')).toBeVisible();
+  });
+
+  test('can add location to response', async ({ page }) => {
+    let responseContent = null;
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    // Mock geolocation
+    await page.addInitScript(() => {
+      navigator.geolocation.getCurrentPosition = (success) => {
+        success({
+          coords: {
+            latitude: 40.7128,
+            longitude: -74.0060,
+            accuracy: 10
+          }
+        });
+      };
+    });
+
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
+        const body = JSON.parse(request.postData());
+        const content = body.tree?.find(t => t.content)?.content;
+        if (content) responseContent = content;
+        return route.fulfill({ json: { sha: 'new-tree-sha' } });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    await page.click('button:has-text("Active")');
+    await page.click('.thread-row');
+
+    // Click location button
+    await page.click('#location-btn');
+
+    // Wait for location to be captured
+    await expect(page.locator('#location-preview')).toBeVisible();
+    await expect(page.locator('#location-text')).toContainText('40.712800');
+
+    // Complete the request
+    await page.click('#action-complete');
+    await page.waitForTimeout(1000);
+
+    expect(responseContent).not.toBeNull();
+    expect(responseContent).toContain('location:');
+    expect(responseContent).toContain('lat:');
+    expect(responseContent).toContain('lng:');
+  });
+});
+
+test.describe('Audio Attachment', () => {
+  test('shows audio button on claimed threads', async ({ page }) => {
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    await page.click('button:has-text("Active")');
+    await page.click('.thread-row');
+
+    await expect(page.locator('#audio-btn')).toBeVisible();
+  });
+});
+
+test.describe('File Attachment', () => {
+  test('shows file button on claimed threads', async ({ page }) => {
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    await page.click('button:has-text("Active")');
+    await page.click('.thread-row');
+
+    await expect(page.locator('#file-input')).toBeAttached();
+  });
+
+  test('rejects files over 500KB', async ({ page }) => {
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    await page.click('button:has-text("Active")');
+    await page.click('.thread-row');
+
+    // Set up dialog handler for the alert
+    page.on('dialog', async dialog => {
+      expect(dialog.message()).toContain('File too large');
+      await dialog.accept();
+    });
+
+    // Try to upload a large file
+    const largeContent = 'x'.repeat(600000); // 600KB
+    const largeFile = Buffer.from(largeContent);
+
+    await page.setInputFiles('#file-input', {
+      name: 'large-file.txt',
+      mimeType: 'text/plain',
+      buffer: largeFile
+    });
+
+    // Preview should NOT be visible because file was rejected
+    await expect(page.locator('#file-preview')).toBeHidden();
+  });
+
+  test('accepts files under 500KB and shows preview', async ({ page }) => {
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    await page.click('button:has-text("Active")');
+    await page.click('.thread-row');
+
+    // Upload a small file
+    const smallContent = 'Hello, this is a test file.';
+    const smallFile = Buffer.from(smallContent);
+
+    await page.setInputFiles('#file-input', {
+      name: 'test-document.txt',
+      mimeType: 'text/plain',
+      buffer: smallFile
+    });
+
+    // Preview should be visible
+    await expect(page.locator('#file-preview')).toBeVisible();
+    await expect(page.locator('#file-name')).toContainText('test-document.txt');
+    await expect(page.locator('#file-meta')).toContainText('text/plain');
+  });
+
+  test('includes file in response when completing', async ({ page }) => {
+    let responseContent = null;
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
+        const body = JSON.parse(request.postData());
+        const content = body.tree?.find(t => t.content)?.content;
+        if (content) responseContent = content;
+        return route.fulfill({ json: { sha: 'new-tree-sha' } });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    await page.click('button:has-text("Active")');
+    await page.click('.thread-row');
+
+    // Upload a small file
+    await page.setInputFiles('#file-input', {
+      name: 'receipt.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('PDF content here')
+    });
+
+    await expect(page.locator('#file-preview')).toBeVisible();
+
+    // Complete the request
+    await page.click('#action-complete');
+    await page.waitForTimeout(1000);
+
+    expect(responseContent).not.toBeNull();
+    expect(responseContent).toContain('file:');
+    expect(responseContent).toContain('name: receipt.pdf');
+    expect(responseContent).toContain('type: application/pdf');
+  });
+});
