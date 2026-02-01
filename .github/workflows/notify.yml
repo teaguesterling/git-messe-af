@@ -42,9 +42,7 @@ jobs:
           GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           GITHUB_REPO: ${{ github.repository }}
-          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
-          # Client URL - set CLIENT_URL secret to override the default GitHub Pages URL
+          # Client URL - defaults to template's hosted client, set CLIENT_URL secret to use your own
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
         run: |
           node << 'SCRIPT'
@@ -508,9 +506,9 @@ jobs:
                   }
                 }
                 
-                // Build client URL - use CLIENT_URL secret if set, otherwise default to GitHub Pages
-                const clientUrl = process.env.CLIENT_URL ||
-                  `https://${process.env.GITHUB_REPO_OWNER}.github.io/${process.env.GITHUB_REPO_NAME}/`;
+                // Build client URL - use CLIENT_URL secret if set, otherwise default to template's hosted client
+                // Note: The data repo (private) is typically separate from the client hosting repo
+                const clientUrl = process.env.CLIENT_URL || 'https://teaguesterling.github.io/git-messe-af/';
 
                 const payload = {
                   ref: envelope.ref,
