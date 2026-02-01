@@ -367,15 +367,49 @@ test.describe('Create Request', () => {
     let createCalled = false;
     await setupGitHubMocks(page);
 
-    await page.route('https://api.github.com/repos/**/contents/exchange/state=received/**', async (route, request) => {
-      if (request.method() === 'PUT') {
+    // V2 format uses Git Data API for atomic directory creation
+    await page.route('https://api.github.com/repos/**/git/ref/heads/main', async (route) => {
+      return route.fulfill({
+        json: { object: { sha: 'current-commit-sha' } }
+      });
+    });
+
+    await page.route('https://api.github.com/repos/**/git/commits/*', async (route) => {
+      return route.fulfill({
+        json: { tree: { sha: 'base-tree-sha' } }
+      });
+    });
+
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
         const body = JSON.parse(request.postData());
-        const content = Buffer.from(body.content, 'base64').toString('utf-8');
-        if (content.includes('Test request intent')) {
+        // Check if tree contains our request content
+        const hasRequestContent = body.tree?.some(t =>
+          t.content?.includes('Test request intent')
+        );
+        if (hasRequestContent) {
           createCalled = true;
         }
         return route.fulfill({
-          json: { content: { sha: 'new-sha' }, commit: { sha: 'commit' } }
+          json: { sha: 'new-tree-sha' }
+        });
+      }
+      return route.fallback();
+    });
+
+    await page.route('https://api.github.com/repos/**/git/commits', async (route, request) => {
+      if (request.method() === 'POST') {
+        return route.fulfill({
+          json: { sha: 'new-commit-sha' }
+        });
+      }
+      return route.fallback();
+    });
+
+    await page.route('https://api.github.com/repos/**/git/refs/heads/main', async (route, request) => {
+      if (request.method() === 'PATCH') {
+        return route.fulfill({
+          json: { object: { sha: 'new-commit-sha' } }
         });
       }
       return route.fallback();
