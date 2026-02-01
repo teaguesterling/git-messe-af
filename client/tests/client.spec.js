@@ -694,4 +694,91 @@ test.describe('Photo Capture', () => {
     const threadRow = page.locator('.thread-row');
     await expect(threadRow.locator('text=📷')).toBeVisible();
   });
+
+  test('compresses large images to stay under size limit', async ({ page }) => {
+    await setupGitHubMocks(page);
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    // Test the compressImage function directly
+    const result = await page.evaluate(async () => {
+      // Create a large test image using canvas (3000x3000 with noise = ~1MB+ uncompressed)
+      const canvas = document.createElement('canvas');
+      canvas.width = 3000;
+      canvas.height = 3000;
+      const ctx = canvas.getContext('2d');
+
+      // Fill with random colors to prevent easy compression
+      const imageData = ctx.createImageData(3000, 3000);
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        imageData.data[i] = Math.random() * 255;     // R
+        imageData.data[i + 1] = Math.random() * 255; // G
+        imageData.data[i + 2] = Math.random() * 255; // B
+        imageData.data[i + 3] = 255;                 // A
+      }
+      ctx.putImageData(imageData, 0, 0);
+
+      // Convert to blob then File
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const file = new File([blob], 'large-test.png', { type: 'image/png' });
+
+      // Get original size
+      const originalSize = file.size;
+
+      // Compress using our function
+      const compressedDataUrl = await window.compressImage(file);
+
+      return {
+        originalSize,
+        compressedSize: compressedDataUrl.length,
+        isJpeg: compressedDataUrl.startsWith('data:image/jpeg'),
+        // Check base64 portion size (after the data URL prefix)
+        base64Size: compressedDataUrl.split(',')[1].length
+      };
+    });
+
+    // Original should be large (>1MB)
+    expect(result.originalSize).toBeGreaterThan(1000000);
+
+    // Compressed should be JPEG
+    expect(result.isJpeg).toBe(true);
+
+    // Compressed should be under 500KB (our IMAGE_MAX_BYTES target)
+    // base64 is ~33% larger than binary, so 500KB binary ≈ 666KB base64
+    expect(result.base64Size).toBeLessThan(700000);
+  });
+
+  test('preserves small images without excessive compression', async ({ page }) => {
+    await setupGitHubMocks(page);
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    const result = await page.evaluate(async () => {
+      // Create a small test image (100x100)
+      const canvas = document.createElement('canvas');
+      canvas.width = 100;
+      canvas.height = 100;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'red';
+      ctx.fillRect(0, 0, 100, 100);
+
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      const file = new File([blob], 'small-test.png', { type: 'image/png' });
+
+      const compressedDataUrl = await window.compressImage(file);
+
+      return {
+        originalSize: file.size,
+        compressedSize: compressedDataUrl.length,
+        isJpeg: compressedDataUrl.startsWith('data:image/jpeg')
+      };
+    });
+
+    // Small image should still be converted to JPEG but remain small
+    expect(result.isJpeg).toBe(true);
+    // Compressed size should be reasonable (< 50KB for a simple 100x100 image)
+    expect(result.compressedSize).toBeLessThan(50000);
+  });
 });
