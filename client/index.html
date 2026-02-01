@@ -416,44 +416,57 @@
       }
 
       // Atomic move: delete old path + create new path in single commit
-      async moveFile(oldPath, newPath, content, message) {
-        // Get current main branch ref
-        const refData = await this.request('/git/ref/heads/main');
-        const currentCommitSha = refData.object.sha;
+      // Retries on "not a fast forward" conflicts
+      async moveFile(oldPath, newPath, content, message, retries = 3) {
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            // Get current main branch ref
+            const refData = await this.request('/git/ref/heads/main');
+            const currentCommitSha = refData.object.sha;
 
-        // Get current commit's tree
-        const commitData = await this.request(`/git/commits/${currentCommitSha}`);
-        const baseTreeSha = commitData.tree.sha;
+            // Get current commit's tree
+            const commitData = await this.request(`/git/commits/${currentCommitSha}`);
+            const baseTreeSha = commitData.tree.sha;
 
-        // Create new tree with deletion + addition in one operation
-        const treeData = await this.request('/git/trees', {
-          method: 'POST',
-          body: JSON.stringify({
-            base_tree: baseTreeSha,
-            tree: [
-              { path: oldPath, mode: '100644', type: 'blob', sha: null }, // delete
-              { path: newPath, mode: '100644', type: 'blob', content }    // create
-            ]
-          })
-        });
+            // Create new tree with deletion + addition in one operation
+            const treeData = await this.request('/git/trees', {
+              method: 'POST',
+              body: JSON.stringify({
+                base_tree: baseTreeSha,
+                tree: [
+                  { path: oldPath, mode: '100644', type: 'blob', sha: null }, // delete
+                  { path: newPath, mode: '100644', type: 'blob', content }    // create
+                ]
+              })
+            });
 
-        // Create commit
-        const newCommit = await this.request('/git/commits', {
-          method: 'POST',
-          body: JSON.stringify({
-            message,
-            tree: treeData.sha,
-            parents: [currentCommitSha]
-          })
-        });
+            // Create commit
+            const newCommit = await this.request('/git/commits', {
+              method: 'POST',
+              body: JSON.stringify({
+                message,
+                tree: treeData.sha,
+                parents: [currentCommitSha]
+              })
+            });
 
-        // Update ref
-        await this.request('/git/refs/heads/main', {
-          method: 'PATCH',
-          body: JSON.stringify({ sha: newCommit.sha })
-        });
+            // Update ref - this is where conflicts are detected
+            await this.request('/git/refs/heads/main', {
+              method: 'PATCH',
+              body: JSON.stringify({ sha: newCommit.sha })
+            });
 
-        return newCommit;
+            return newCommit;
+          } catch (e) {
+            const isConflict = e.message.includes('fast forward') || e.message.includes('422');
+            if (isConflict && attempt < retries) {
+              // Wait briefly then retry with fresh ref
+              await new Promise(r => setTimeout(r, 500 * attempt));
+              continue;
+            }
+            throw e;
+          }
+        }
       }
 
       async getThread(folder, filename) {
