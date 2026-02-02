@@ -122,6 +122,24 @@ ref: "2026-02-01-001"
 reason: "No longer needed"
 ```
 
+### `mess_get_resource` - Fetch Resource Content
+
+Fetch images, files, or thread data from MESS resource URIs.
+
+**Input:**
+```yaml
+uri: "content://2026-02-01-001/photo.jpg"
+```
+
+**Supported URIs:**
+- `content://{ref}/{filename}` - Attachments
+- `thread://{ref}` - Full thread
+- `thread://{ref}/envelope` - Metadata only
+- `thread://{ref}/latest` - Latest message
+- `mess://help` - Documentation
+
+For images, returns base64 data with mime type.
+
 ## Resources
 
 ### `content://` - Attachments

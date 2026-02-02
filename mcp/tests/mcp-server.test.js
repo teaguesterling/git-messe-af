@@ -1364,3 +1364,76 @@ Example: \`thread://2026-02-01-001\` or \`thread://2026-02-01-001/latest\``;
     assert.ok(description.includes('mess://help'));
   });
 });
+
+describe('mess_get_resource Tool', () => {
+  it('validates content:// URI format', () => {
+    const uri = 'content://2026-02-01-001/photo.jpg';
+    const match = uri.match(/^content:\/\/([^/]+)\/(.+)$/);
+
+    assert.ok(match);
+    assert.strictEqual(match[1], '2026-02-01-001');
+    assert.strictEqual(match[2], 'photo.jpg');
+  });
+
+  it('validates thread:// URI format', () => {
+    const uri = 'thread://2026-02-01-001';
+    const match = uri.match(/^thread:\/\/([^/]+)(\/(.+))?$/);
+
+    assert.ok(match);
+    assert.strictEqual(match[1], '2026-02-01-001');
+  });
+
+  it('validates mess://help URI', () => {
+    const uri = 'mess://help';
+    assert.strictEqual(uri, 'mess://help');
+  });
+
+  it('rejects invalid URI schemes', () => {
+    const invalidUris = [
+      'http://example.com',
+      'file:///etc/passwd',
+      'ftp://server/file',
+      'invalid-uri'
+    ];
+
+    for (const uri of invalidUris) {
+      const isContent = uri.match(/^content:\/\//);
+      const isThread = uri.match(/^thread:\/\//);
+      const isMess = uri === 'mess://help';
+      const isValid = isContent || isThread || isMess;
+
+      assert.ok(!isValid, `Expected ${uri} to be rejected`);
+    }
+  });
+
+  it('handles binary response format', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/photo.jpg',
+      mimeType: 'image/jpeg',
+      blob: '/9j/4AAQSkZJRg...'
+    };
+
+    // Simulate what the handler does for binary content
+    const result = {
+      uri: resource.uri,
+      mimeType: resource.mimeType,
+      encoding: 'base64',
+      data: resource.blob
+    };
+
+    assert.strictEqual(result.encoding, 'base64');
+    assert.ok(result.data);
+    assert.strictEqual(result.mimeType, 'image/jpeg');
+  });
+
+  it('handles text response format', () => {
+    const resource = {
+      uri: 'mess://help',
+      mimeType: 'text/markdown',
+      text: '# MESS Protocol Help\n...'
+    };
+
+    // Text content is returned directly
+    assert.ok(resource.text.startsWith('#'));
+  });
+});

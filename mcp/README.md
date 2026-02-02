@@ -7,7 +7,7 @@ An MCP (Model Context Protocol) server that enables AI agents like Claude to dis
 - **GitHub sync**: Tasks sync to/from your GitHub repository
 - **Local mode**: Store tasks locally without GitHub
 - **Hybrid mode**: Local storage with GitHub backup
-- Six tools: `mess`, `mess_status`, `mess_capabilities`, `mess_request`, `mess_answer`, `mess_cancel`
+- Seven tools: `mess`, `mess_status`, `mess_capabilities`, `mess_request`, `mess_answer`, `mess_cancel`, `mess_get_resource`
 - Resources: `content://` for attachments, `thread://` for thread data
 
 ## Installation
@@ -268,6 +268,27 @@ Cancel a pending or in-progress request.
 **Parameters:**
 - `ref` (required): Thread ref to cancel
 - `reason`: Why you're cancelling (optional)
+
+### `mess_get_resource`
+
+Fetch content from MESS resource URIs. Use this to retrieve images, files, or thread data referenced in responses.
+
+**Parameters:**
+- `uri` (required): Resource URI
+
+**Supported URIs:**
+- `content://{ref}/{filename}` - Attachments (images, files)
+- `thread://{ref}` - Full thread data
+- `thread://{ref}/envelope` - Thread metadata only
+- `thread://{ref}/latest` - Most recent message
+- `mess://help` - Protocol documentation
+
+**Example:**
+```json
+{ "uri": "content://2026-02-01-001/photo.jpg" }
+```
+
+For images, returns base64-encoded data with mime type.
 
 ## Resources
 

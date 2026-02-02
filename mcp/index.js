@@ -1241,6 +1241,32 @@ Use this when you no longer need the task completed.`,
         },
         required: ['ref']
       }
+    },
+    {
+      name: 'mess_get_resource',
+      description: `Fetch a MESS resource by URI.
+
+Use this to retrieve images, files, thread data, or documentation.
+
+Supported URI schemes:
+- \`content://{ref}/{filename}\` - Attachments (images, files)
+- \`thread://{ref}\` - Full thread data
+- \`thread://{ref}/envelope\` - Thread metadata only
+- \`thread://{ref}/latest\` - Most recent message
+- \`mess://help\` - Protocol documentation
+
+For images, returns base64-encoded data with mime type.
+For thread/text data, returns the content directly.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          uri: {
+            type: 'string',
+            description: 'Resource URI (e.g., "content://2026-02-01-001/photo.jpg", "thread://2026-02-01-001", or "mess://help")'
+          }
+        },
+        required: ['uri']
+      }
     }
   ]
 }));
@@ -1332,6 +1358,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }];
       const result = await updateThread(args.ref, AGENT_ID, mess, 'cancelled');
       return { content: [{ type: 'text', text: YAML.stringify(result) }] };
+    }
+
+    if (name === 'mess_get_resource') {
+      const resource = await readResource(args.uri);
+
+      // Handle different content types
+      if (resource.blob) {
+        // Binary content (images, files) - return as base64 with metadata
+        return {
+          content: [{
+            type: 'text',
+            text: YAML.stringify({
+              uri: resource.uri,
+              mimeType: resource.mimeType,
+              encoding: 'base64',
+              data: resource.blob
+            })
+          }]
+        };
+      } else if (resource.text) {
+        // Text content (markdown, thread data)
+        return {
+          content: [{
+            type: 'text',
+            text: resource.text
+          }]
+        };
+      } else {
+        // Structured data (thread resources return objects)
+        return {
+          content: [{
+            type: 'text',
+            text: YAML.stringify(resource)
+          }]
+        };
+      }
     }
 
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };
