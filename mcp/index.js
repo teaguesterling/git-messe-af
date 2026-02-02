@@ -175,6 +175,29 @@ function guessMimeType(filename) {
 // ============ Capabilities ============
 
 /**
+ * Parse capabilities from multi-doc YAML content
+ * @param {string} content - YAML content (may contain multiple docs separated by ---)
+ * @returns {Array} List of capabilities
+ */
+function parseCapabilities(content) {
+  const capabilities = [];
+  const docs = content.split(/^---$/m).filter(d => d.trim());
+
+  for (const doc of docs) {
+    try {
+      const cap = YAML.parse(doc);
+      if (cap && cap.id && cap.description) {
+        capabilities.push(cap);
+      }
+    } catch (e) {
+      // Skip invalid docs
+    }
+  }
+
+  return capabilities;
+}
+
+/**
  * Load capabilities from local directory
  * @returns {Promise<Array>} List of capabilities
  */
@@ -185,40 +208,18 @@ async function loadLocalCapabilities() {
     const entries = await fs.readdir(CAPABILITIES_DIR, { withFileTypes: true });
 
     for (const entry of entries) {
-      if (entry.isFile() && entry.name.endsWith('.yaml') && !entry.name.startsWith('_')) {
+      if (entry.isFile() && entry.name.endsWith('.yaml')) {
         try {
           const content = await fs.readFile(path.join(CAPABILITIES_DIR, entry.name), 'utf-8');
-          const cap = YAML.parse(content);
-          if (cap.id) {
-            capabilities.push(cap);
-          }
+          capabilities.push(...parseCapabilities(content));
         } catch (e) {
           console.error(`Failed to parse capability ${entry.name}:`, e.message);
         }
       }
     }
 
-    // Load index for ordering if it exists
-    try {
-      const indexPath = path.join(CAPABILITIES_DIR, '_index.yaml');
-      const indexContent = await fs.readFile(indexPath, 'utf-8');
-      const index = YAML.parse(indexContent);
-
-      if (index.order) {
-        // Sort capabilities by index order
-        capabilities.sort((a, b) => {
-          const aIdx = index.order.indexOf(a.id);
-          const bIdx = index.order.indexOf(b.id);
-          if (aIdx === -1 && bIdx === -1) return a.id.localeCompare(b.id);
-          if (aIdx === -1) return 1;
-          if (bIdx === -1) return -1;
-          return aIdx - bIdx;
-        });
-      }
-    } catch (e) {
-      // No index file, sort alphabetically
-      capabilities.sort((a, b) => a.id.localeCompare(b.id));
-    }
+    // Sort alphabetically by id
+    capabilities.sort((a, b) => a.id.localeCompare(b.id));
   } catch (e) {
     if (e.code !== 'ENOENT') {
       console.error('Failed to load local capabilities:', e.message);
@@ -241,14 +242,11 @@ async function loadGitHubCapabilities(github) {
     if (!entries) return capabilities;
 
     for (const entry of entries) {
-      if (entry.type === 'file' && entry.name.endsWith('.yaml') && !entry.name.startsWith('_')) {
+      if (entry.type === 'file' && entry.name.endsWith('.yaml')) {
         try {
           const result = await github.getFile(`capabilities/${entry.name}`);
           if (result) {
-            const cap = YAML.parse(result.content);
-            if (cap.id) {
-              capabilities.push(cap);
-            }
+            capabilities.push(...parseCapabilities(result.content));
           }
         } catch (e) {
           console.error(`Failed to parse capability ${entry.name}:`, e.message);
@@ -256,25 +254,8 @@ async function loadGitHubCapabilities(github) {
       }
     }
 
-    // Load index for ordering
-    try {
-      const indexResult = await github.getFile('capabilities/_index.yaml');
-      if (indexResult) {
-        const index = YAML.parse(indexResult.content);
-        if (index.order) {
-          capabilities.sort((a, b) => {
-            const aIdx = index.order.indexOf(a.id);
-            const bIdx = index.order.indexOf(b.id);
-            if (aIdx === -1 && bIdx === -1) return a.id.localeCompare(b.id);
-            if (aIdx === -1) return 1;
-            if (bIdx === -1) return -1;
-            return aIdx - bIdx;
-          });
-        }
-      }
-    } catch (e) {
-      capabilities.sort((a, b) => a.id.localeCompare(b.id));
-    }
+    // Sort alphabetically by id
+    capabilities.sort((a, b) => a.id.localeCompare(b.id));
   } catch (e) {
     console.error('Failed to load GitHub capabilities:', e.message);
   }
@@ -1067,25 +1048,17 @@ Use to:
       name: 'mess_capabilities',
       description: `List available physical-world capabilities for this exchange.
 
-Returns capabilities that human executors can perform, such as:
-- Checking doors, appliances, or security
-- Package and delivery checks
-- Pet care and plant watering
-- Fridge/pantry inventory
-
-Each capability includes:
+Returns capabilities that human executors can perform. Each capability has:
 - id: Unique identifier
-- name: Human-readable name
-- description: What the capability does
-- examples: Example requests that match this capability
-- tools: Physical tools/access required
-- response_hints: Expected response types (text, image, etc.)
+- description: What the capability enables
+- tags: Optional searchable tags
+- definition: Optional URL to detailed documentation
 
 Use this to understand what kinds of physical-world tasks can be requested.`,
       inputSchema: {
         type: 'object',
         properties: {
-          category: { type: 'string', description: 'Filter by category (e.g., "security", "care", "maintenance")' }
+          tag: { type: 'string', description: 'Filter by tag (e.g., "security", "attachments")' }
         }
       }
     }
@@ -1140,22 +1113,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const capabilities = await getCapabilities();
       let result = capabilities;
 
-      // Filter by category if specified
-      if (args.category) {
-        result = capabilities.filter(c => c.category === args.category);
+      // Filter by tag if specified
+      if (args.tag) {
+        result = capabilities.filter(c => c.tags?.includes(args.tag));
       }
 
-      // Return summary format for listing
-      const summary = result.map(c => ({
-        id: c.id,
-        name: c.name,
-        description: c.description,
-        category: c.category,
-        examples: c.examples,
-        response_hints: c.response_hints
-      }));
-
-      return { content: [{ type: 'text', text: YAML.stringify(summary) }] };
+      return { content: [{ type: 'text', text: YAML.stringify(result) }] };
     }
 
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };

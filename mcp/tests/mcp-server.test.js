@@ -638,7 +638,26 @@ describe('Capabilities', () => {
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 
-  // Helper to load capabilities from a directory (mirrors mcp/index.js logic)
+  // Helper to parse capabilities from multi-doc YAML (mirrors mcp/index.js logic)
+  function parseCapabilities(content) {
+    const capabilities = [];
+    const docs = content.split(/^---$/m).filter(d => d.trim());
+
+    for (const doc of docs) {
+      try {
+        const cap = YAML.parse(doc);
+        if (cap && cap.id && cap.description) {
+          capabilities.push(cap);
+        }
+      } catch (e) {
+        // Skip invalid docs
+      }
+    }
+
+    return capabilities;
+  }
+
+  // Helper to load capabilities from a directory
   async function loadCapabilitiesFromDir(dir) {
     const capabilities = [];
 
@@ -646,38 +665,17 @@ describe('Capabilities', () => {
       const entries = await fs.readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (entry.isFile() && entry.name.endsWith('.yaml') && !entry.name.startsWith('_')) {
+        if (entry.isFile() && entry.name.endsWith('.yaml')) {
           try {
             const content = await fs.readFile(path.join(dir, entry.name), 'utf-8');
-            const cap = YAML.parse(content);
-            if (cap.id) {
-              capabilities.push(cap);
-            }
+            capabilities.push(...parseCapabilities(content));
           } catch (e) {
             // Skip invalid files
           }
         }
       }
 
-      // Load index for ordering if it exists
-      try {
-        const indexPath = path.join(dir, '_index.yaml');
-        const indexContent = await fs.readFile(indexPath, 'utf-8');
-        const index = YAML.parse(indexContent);
-
-        if (index.order) {
-          capabilities.sort((a, b) => {
-            const aIdx = index.order.indexOf(a.id);
-            const bIdx = index.order.indexOf(b.id);
-            if (aIdx === -1 && bIdx === -1) return a.id.localeCompare(b.id);
-            if (aIdx === -1) return 1;
-            if (bIdx === -1) return -1;
-            return aIdx - bIdx;
-          });
-        }
-      } catch (e) {
-        capabilities.sort((a, b) => a.id.localeCompare(b.id));
-      }
+      capabilities.sort((a, b) => a.id.localeCompare(b.id));
     } catch (e) {
       // Directory doesn't exist
     }
@@ -685,126 +683,95 @@ describe('Capabilities', () => {
     return capabilities;
   }
 
-  it('loads capabilities from YAML files', async () => {
-    const cap1 = `id: check-door
-name: Check Door
-description: Check if a door is locked
-category: security
-examples:
-  - Is the front door locked?
-response_hints:
-  - text
-  - image`;
+  it('parses multi-doc YAML capabilities', () => {
+    const content = `id: camera
+description: Take and attach photos
+tags: [attachments]
+---
+id: hands
+description: Has human hands
+---
+id: check-door
+description: Check if doors are locked
+tags: [security]`;
 
-    const cap2 = `id: water-plants
-name: Water Plants
-description: Water indoor plants
-category: maintenance
-examples:
-  - Water the houseplants
-response_hints:
-  - text`;
+    const capabilities = parseCapabilities(content);
 
-    await fs.writeFile(path.join(tempDir, 'check-door.yaml'), cap1);
-    await fs.writeFile(path.join(tempDir, 'water-plants.yaml'), cap2);
+    assert.strictEqual(capabilities.length, 3);
+    assert.strictEqual(capabilities[0].id, 'camera');
+    assert.strictEqual(capabilities[1].id, 'hands');
+    assert.strictEqual(capabilities[2].id, 'check-door');
+  });
+
+  it('requires both id and description', () => {
+    const content = `id: valid
+description: Has both fields
+---
+id: missing-description
+---
+description: Missing id field
+---
+id: also-valid
+description: Another valid one`;
+
+    const capabilities = parseCapabilities(content);
+
+    assert.strictEqual(capabilities.length, 2);
+    assert.ok(capabilities.some(c => c.id === 'valid'));
+    assert.ok(capabilities.some(c => c.id === 'also-valid'));
+  });
+
+  it('loads capabilities from directory', async () => {
+    const content = `id: camera
+description: Take photos
+---
+id: hands
+description: Human hands`;
+
+    await fs.writeFile(path.join(tempDir, 'capabilities.yaml'), content);
 
     const capabilities = await loadCapabilitiesFromDir(tempDir);
 
     assert.strictEqual(capabilities.length, 2);
-    assert.ok(capabilities.some(c => c.id === 'check-door'));
-    assert.ok(capabilities.some(c => c.id === 'water-plants'));
+    assert.ok(capabilities.some(c => c.id === 'camera'));
+    assert.ok(capabilities.some(c => c.id === 'hands'));
   });
 
-  it('ignores files starting with underscore', async () => {
-    const cap = `id: test-cap
-name: Test
-description: Test capability
-category: test`;
+  it('loads from multiple files', async () => {
+    const file1 = `id: camera
+description: Take photos`;
 
-    const index = `order:
-  - test-cap`;
+    const file2 = `id: mobility
+description: Move around
+---
+id: hands
+description: Human hands`;
 
-    await fs.writeFile(path.join(tempDir, 'test-cap.yaml'), cap);
-    await fs.writeFile(path.join(tempDir, '_index.yaml'), index);
-
-    const capabilities = await loadCapabilitiesFromDir(tempDir);
-
-    assert.strictEqual(capabilities.length, 1);
-    assert.strictEqual(capabilities[0].id, 'test-cap');
-  });
-
-  it('ignores files without id field', async () => {
-    const validCap = `id: valid-cap
-name: Valid
-description: Has an id
-category: test`;
-
-    const invalidCap = `name: Invalid
-description: No id field
-category: test`;
-
-    await fs.writeFile(path.join(tempDir, 'valid.yaml'), validCap);
-    await fs.writeFile(path.join(tempDir, 'invalid.yaml'), invalidCap);
-
-    const capabilities = await loadCapabilitiesFromDir(tempDir);
-
-    assert.strictEqual(capabilities.length, 1);
-    assert.strictEqual(capabilities[0].id, 'valid-cap');
-  });
-
-  it('sorts capabilities by index order when provided', async () => {
-    const cap1 = `id: zebra
-name: Zebra
-description: Last alphabetically
-category: test`;
-
-    const cap2 = `id: alpha
-name: Alpha
-description: First alphabetically
-category: test`;
-
-    const cap3 = `id: middle
-name: Middle
-description: Middle alphabetically
-category: test`;
-
-    const index = `order:
-  - middle
-  - zebra
-  - alpha`;
-
-    await fs.writeFile(path.join(tempDir, 'zebra.yaml'), cap1);
-    await fs.writeFile(path.join(tempDir, 'alpha.yaml'), cap2);
-    await fs.writeFile(path.join(tempDir, 'middle.yaml'), cap3);
-    await fs.writeFile(path.join(tempDir, '_index.yaml'), index);
+    await fs.writeFile(path.join(tempDir, 'basics.yaml'), file1);
+    await fs.writeFile(path.join(tempDir, 'physical.yaml'), file2);
 
     const capabilities = await loadCapabilitiesFromDir(tempDir);
 
     assert.strictEqual(capabilities.length, 3);
-    assert.strictEqual(capabilities[0].id, 'middle');
-    assert.strictEqual(capabilities[1].id, 'zebra');
-    assert.strictEqual(capabilities[2].id, 'alpha');
   });
 
-  it('sorts alphabetically when no index exists', async () => {
-    const cap1 = `id: zebra
-name: Zebra
+  it('sorts alphabetically by id', async () => {
+    const content = `id: zebra
 description: Last
-category: test`;
-
-    const cap2 = `id: alpha
-name: Alpha
+---
+id: alpha
 description: First
-category: test`;
+---
+id: middle
+description: Middle`;
 
-    await fs.writeFile(path.join(tempDir, 'zebra.yaml'), cap1);
-    await fs.writeFile(path.join(tempDir, 'alpha.yaml'), cap2);
+    await fs.writeFile(path.join(tempDir, 'caps.yaml'), content);
 
     const capabilities = await loadCapabilitiesFromDir(tempDir);
 
-    assert.strictEqual(capabilities.length, 2);
     assert.strictEqual(capabilities[0].id, 'alpha');
-    assert.strictEqual(capabilities[1].id, 'zebra');
+    assert.strictEqual(capabilities[1].id, 'middle');
+    assert.strictEqual(capabilities[2].id, 'zebra');
   });
 
   it('returns empty array for nonexistent directory', async () => {
@@ -812,110 +779,48 @@ category: test`;
     assert.deepStrictEqual(capabilities, []);
   });
 
-  it('parses full capability with all fields', async () => {
-    const fullCap = `id: pet-status
-name: Pet Status Check
-description: Check on pets and report their status.
-category: care
+  it('preserves optional fields', () => {
+    const content = `id: smart-home
+description: Control smart home devices
+tags: [automation, iot]
+definition: https://example.com/docs.md`;
 
-extended_description: |
-  Check on household pets and report their status.
-  Look for general demeanor and food/water levels.
-
-tools:
-  - physical-access
-  - camera
-
-examples:
-  - How is the dog doing?
-  - Check on the cat
-
-response_hints:
-  - image
-  - text
-
-estimated_duration: 1-3 minutes
-tags:
-  - pets
-  - animals`;
-
-    await fs.writeFile(path.join(tempDir, 'pet-status.yaml'), fullCap);
-
-    const capabilities = await loadCapabilitiesFromDir(tempDir);
+    const capabilities = parseCapabilities(content);
 
     assert.strictEqual(capabilities.length, 1);
     const cap = capabilities[0];
 
-    assert.strictEqual(cap.id, 'pet-status');
-    assert.strictEqual(cap.name, 'Pet Status Check');
-    assert.strictEqual(cap.category, 'care');
-    assert.ok(cap.extended_description.includes('household pets'));
-    assert.deepStrictEqual(cap.tools, ['physical-access', 'camera']);
-    assert.strictEqual(cap.examples.length, 2);
-    assert.deepStrictEqual(cap.response_hints, ['image', 'text']);
-    assert.strictEqual(cap.estimated_duration, '1-3 minutes');
-    assert.deepStrictEqual(cap.tags, ['pets', 'animals']);
+    assert.strictEqual(cap.id, 'smart-home');
+    assert.strictEqual(cap.description, 'Control smart home devices');
+    assert.deepStrictEqual(cap.tags, ['automation', 'iot']);
+    assert.strictEqual(cap.definition, 'https://example.com/docs.md');
+  });
+
+  it('handles minimal capability definition', () => {
+    const content = `id: hands
+description: Has human hands`;
+
+    const capabilities = parseCapabilities(content);
+
+    assert.strictEqual(capabilities.length, 1);
+    assert.strictEqual(capabilities[0].id, 'hands');
+    assert.strictEqual(capabilities[0].description, 'Has human hands');
+    assert.strictEqual(capabilities[0].tags, undefined);
   });
 });
 
 describe('Capabilities Filtering', () => {
-  it('filters capabilities by category', () => {
+  it('filters capabilities by tag', () => {
     const capabilities = [
-      { id: 'check-door', category: 'security' },
-      { id: 'check-stove', category: 'security' },
-      { id: 'water-plants', category: 'maintenance' },
-      { id: 'pet-status', category: 'care' }
+      { id: 'check-door', description: 'Check doors', tags: ['security', 'physical-access'] },
+      { id: 'check-stove', description: 'Check stove', tags: ['security', 'safety'] },
+      { id: 'water-plants', description: 'Water plants', tags: ['maintenance'] },
+      { id: 'camera', description: 'Take photos', tags: ['attachments'] }
     ];
 
-    const securityCaps = capabilities.filter(c => c.category === 'security');
-    const maintenanceCaps = capabilities.filter(c => c.category === 'maintenance');
+    const securityCaps = capabilities.filter(c => c.tags?.includes('security'));
 
     assert.strictEqual(securityCaps.length, 2);
-    assert.strictEqual(maintenanceCaps.length, 1);
-    assert.ok(securityCaps.every(c => c.category === 'security'));
-  });
-
-  it('returns summary format for tool response', () => {
-    const capabilities = [
-      {
-        id: 'check-door',
-        name: 'Check Door',
-        description: 'Check if door is locked',
-        category: 'security',
-        extended_description: 'Long detailed description...',
-        tools: ['physical-access', 'camera'],
-        examples: ['Is the door locked?'],
-        response_hints: ['text', 'image'],
-        estimated_duration: '1 minute',
-        tags: ['door', 'security']
-      }
-    ];
-
-    // Simulate mess_capabilities handler summary format
-    const summary = capabilities.map(c => ({
-      id: c.id,
-      name: c.name,
-      description: c.description,
-      category: c.category,
-      examples: c.examples,
-      response_hints: c.response_hints
-    }));
-
-    assert.strictEqual(summary.length, 1);
-    const cap = summary[0];
-
-    // Summary should include key fields
-    assert.strictEqual(cap.id, 'check-door');
-    assert.strictEqual(cap.name, 'Check Door');
-    assert.strictEqual(cap.description, 'Check if door is locked');
-    assert.strictEqual(cap.category, 'security');
-    assert.deepStrictEqual(cap.examples, ['Is the door locked?']);
-    assert.deepStrictEqual(cap.response_hints, ['text', 'image']);
-
-    // Summary should NOT include verbose fields
-    assert.strictEqual(cap.extended_description, undefined);
-    assert.strictEqual(cap.tools, undefined);
-    assert.strictEqual(cap.estimated_duration, undefined);
-    assert.strictEqual(cap.tags, undefined);
+    assert.ok(securityCaps.every(c => c.tags.includes('security')));
   });
 });

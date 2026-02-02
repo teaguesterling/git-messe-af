@@ -1,0 +1,39 @@
+id: camera
+description: Take and attach photos
+tags: [attachments]
+---
+id: hands
+description: Has human hands for physical manipulation
+tags: [physical-access]
+---
+id: mobility
+description: Can move around the home/property
+tags: [physical-access]
+---
+id: check-door
+description: Check if doors are locked or closed
+tags: [security, physical-access]
+---
+id: check-stove
+description: Verify stove/oven is turned off
+tags: [security, safety]
+---
+id: check-fridge
+description: Check fridge contents and expiration dates
+tags: [inventory, kitchen]
+---
+id: water-plants
+description: Water indoor or outdoor plants
+tags: [maintenance, garden]
+---
+id: check-packages
+description: Check for delivered packages
+tags: [errands, deliveries]
+---
+id: pet-care
+description: Check on pets, food/water levels, general wellbeing
+tags: [care, pets]
+---
+id: operate-garage-door
+description: Open or close the garage door
+tags: [automation, physical-access]
