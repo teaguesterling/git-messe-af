@@ -94,7 +94,15 @@ async function cacheAttachment(ref, filename, base64Data, mime) {
  * @returns {Array} List of resource descriptors
  */
 function getRegisteredResources() {
-  const resources = [];
+  const resources = [
+    // Always include the help resource
+    {
+      uri: 'mess://help',
+      name: 'MESS Protocol Documentation',
+      mimeType: 'text/markdown',
+      description: 'Full documentation for MESS tools and resources. Read this to learn how to use MESS effectively.'
+    }
+  ];
   for (const [ref, attachments] of resourceRegistry) {
     for (const [filename, info] of attachments) {
       resources.push({
@@ -110,10 +118,51 @@ function getRegisteredResources() {
 
 /**
  * Read a resource by URI
- * @param {string} uri - Resource URI (content://ref/filename or thread://ref[/part])
+ * @param {string} uri - Resource URI (content://ref/filename, thread://ref[/part], or mess://help)
  * @returns {Object} Resource content
  */
 async function readResource(uri) {
+  // Handle mess://help - return SKILL.md documentation
+  if (uri === 'mess://help') {
+    const skillPath = path.join(path.dirname(new URL(import.meta.url).pathname), 'SKILL.md');
+    try {
+      const content = await fs.readFile(skillPath, 'utf8');
+      return {
+        uri,
+        mimeType: 'text/markdown',
+        text: content
+      };
+    } catch (e) {
+      // Fallback to inline help if file not found
+      return {
+        uri,
+        mimeType: 'text/markdown',
+        text: `# MESS Protocol Help
+
+## Tools
+- \`mess_request\` - Create a new physical-world task request
+- \`mess_status\` - Check status of requests (returns content:// URIs for attachments)
+- \`mess_answer\` - Answer executor questions (when status is needs_input)
+- \`mess_cancel\` - Cancel a request
+- \`mess_capabilities\` - List available capabilities
+
+## Resources
+- \`content://{ref}/{filename}\` - Fetch attachment content (images, files)
+- \`thread://{ref}\` - Get full thread data
+- \`thread://{ref}/envelope\` - Get thread metadata only
+- \`thread://{ref}/latest\` - Get most recent message
+
+## Fetching Attachments
+When \`mess_status\` returns a \`content://\` URI, use MCP resources/read to fetch it.
+The content will be returned as base64-encoded data.
+
+## Status Codes
+pending → claimed → in_progress → completed/failed/needs_input
+`
+      };
+    }
+  }
+
   // Handle thread:// URIs
   const threadMatch = uri.match(/^thread:\/\/([^/]+)(\/(.+))?$/);
   if (threadMatch) {
@@ -1101,7 +1150,16 @@ With ref: Returns full details including message history.
 Use to:
 - See if any requests need attention
 - Check if a request was completed
-- Get responses from completed requests`,
+- Get responses from completed requests
+
+**Attachments:** Responses may include \`content://\` URIs for images/files.
+These are MCP resources - fetch them using the MCP resources/read protocol.
+Example: \`content://2026-02-01-001/photo.jpg\`
+
+**Thread data:** Use \`thread://{ref}\` resources for structured thread access.
+Example: \`thread://2026-02-01-001\` or \`thread://2026-02-01-001/latest\`
+
+For full documentation, read the \`mess://help\` resource.`,
       inputSchema: {
         type: 'object',
         properties: {

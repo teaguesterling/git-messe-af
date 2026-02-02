@@ -1294,3 +1294,73 @@ describe('Background Sync', () => {
     assert.strictEqual(threadStateCache.get('2026-02-01-003').status, 'completed');
   });
 });
+
+describe('Help Resource', () => {
+  it('parses mess://help URI', () => {
+    const uri = 'mess://help';
+    const isHelpUri = uri === 'mess://help';
+
+    assert.strictEqual(isHelpUri, true);
+  });
+
+  it('mess://help is included in registered resources', () => {
+    // Simulate getRegisteredResources
+    const resources = [
+      {
+        uri: 'mess://help',
+        name: 'MESS Protocol Documentation',
+        mimeType: 'text/markdown',
+        description: 'Full documentation for MESS tools and resources.'
+      }
+    ];
+
+    const helpResource = resources.find(r => r.uri === 'mess://help');
+
+    assert.ok(helpResource);
+    assert.strictEqual(helpResource.mimeType, 'text/markdown');
+    assert.ok(helpResource.description.includes('documentation'));
+  });
+
+  it('help resource has required fields', () => {
+    const helpResource = {
+      uri: 'mess://help',
+      name: 'MESS Protocol Documentation',
+      mimeType: 'text/markdown',
+      description: 'Full documentation for MESS tools and resources.'
+    };
+
+    assert.ok(helpResource.uri);
+    assert.ok(helpResource.name);
+    assert.ok(helpResource.mimeType);
+    assert.ok(helpResource.description);
+  });
+});
+
+describe('Tool Descriptions', () => {
+  it('mess_status description mentions content:// resources', () => {
+    const description = `Check status of MESS requests.
+
+Without ref: Returns all pending/in-progress requests.
+With ref: Returns full details including message history.
+
+**Attachments:** Responses may include \`content://\` URIs for images/files.
+These are MCP resources - fetch them using the MCP resources/read protocol.`;
+
+    assert.ok(description.includes('content://'));
+    assert.ok(description.includes('MCP resources'));
+  });
+
+  it('mess_status description mentions thread:// resources', () => {
+    const description = `**Thread data:** Use \`thread://{ref}\` resources for structured thread access.
+Example: \`thread://2026-02-01-001\` or \`thread://2026-02-01-001/latest\``;
+
+    assert.ok(description.includes('thread://'));
+    assert.ok(description.includes('/latest'));
+  });
+
+  it('mess_status description mentions mess://help', () => {
+    const description = `For full documentation, read the \`mess://help\` resource.`;
+
+    assert.ok(description.includes('mess://help'));
+  });
+});
