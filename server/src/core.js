@@ -7,6 +7,37 @@
 
 // ============ Helpers ============
 
+/**
+ * Expand {{variable}} templates in strings and objects
+ * Supports nested access like {{thread.intent}}
+ */
+export function templateExpand(template, context) {
+  if (typeof template === 'string') {
+    return template.replace(/\{\{([\w.]+)\}\}/g, (match, path) => {
+      const keys = path.split('.');
+      let value = context;
+      for (const key of keys) {
+        if (value === undefined || value === null) return '';
+        value = value[key];
+      }
+      if (value === undefined || value === null) return '';
+      if (typeof value === 'object') return JSON.stringify(value);
+      return String(value);
+    });
+  }
+  if (Array.isArray(template)) {
+    return template.map(item => templateExpand(item, context));
+  }
+  if (typeof template === 'object' && template !== null) {
+    const result = {};
+    for (const [key, value] of Object.entries(template)) {
+      result[key] = templateExpand(value, context);
+    }
+    return result;
+  }
+  return template;
+}
+
 export function generateRef() {
   const now = new Date();
   const date = now.toISOString().slice(0, 10);
@@ -47,6 +78,34 @@ export function parseApiKey(apiKey) {
     return { valid: false, exchangeId: null };
   }
   return { valid: true, exchangeId: parts[1] };
+}
+
+// ============ Google OAuth Helper ============
+
+/**
+ * Get Google OAuth access token using refresh token
+ * Works in both Node.js and Cloudflare Workers (uses fetch)
+ */
+async function getGoogleAccessToken(hook) {
+  const params = new URLSearchParams({
+    client_id: hook.client_id,
+    client_secret: hook.client_secret,
+    refresh_token: hook.refresh_token,
+    grant_type: 'refresh_token',
+  });
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google token refresh failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.access_token;
 }
 
 // ============ Handler Factory ============
@@ -224,6 +283,307 @@ export function createHandlers(storage) {
     return threads;
   }
 
+  // ---- Webhooks / Hooks ----
+  
+  /**
+   * Execute lifecycle hooks for an event
+   * 
+   * Hook types:
+   * - webhook: POST to any URL with templated body
+   * - ifttt: Trigger IFTTT Webhooks (easy path to Google Keep, etc.)
+   * - google_tasks: Add to Google Tasks via API (requires OAuth)
+   * - zapier: Trigger Zapier webhook
+   * 
+   * Template variables available:
+   * - {{ref}}, {{intent}}, {{status}}, {{priority}}
+   * - {{requestor_id}}, {{executor_id}}
+   * - {{created_at}}, {{updated_at}}
+   * - {{event}} - the event type (created, claimed, completed, etc.)
+   */
+  async function executeHooks(hookName, thread, executor, extra = {}) {
+    const hooks = executor.hooks?.[hookName] || [];
+    
+    // Build template context
+    const context = {
+      ...thread,
+      event: hookName.replace('on_request_', ''),
+      executor_name: executor.display_name,
+      ...extra,
+    };
+    
+    const results = [];
+    
+    for (const hook of hooks) {
+      try {
+        const result = await executeHook(hook, context);
+        results.push({ hook: hook.type, success: true, result });
+      } catch (e) {
+        console.error(`Hook ${hook.type} failed for ${executor.id}:`, e.message);
+        results.push({ hook: hook.type, success: false, error: e.message });
+      }
+    }
+    
+    return results;
+  }
+  
+  async function executeHook(hook, context) {
+    switch (hook.type) {
+      case 'webhook': {
+        const url = templateExpand(hook.url, context);
+        const headers = templateExpand(hook.headers || {}, context);
+        const body = templateExpand(hook.body || {}, context);
+        
+        const response = await fetch(url, {
+          method: hook.method || 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: JSON.stringify(body),
+        });
+        
+        // Try to extract external ID from response for bidirectional sync
+        let externalId = null;
+        try {
+          const data = await response.json();
+          externalId = data.id || data.task_id || data.item_id || null;
+        } catch (e) {
+          // Response might not be JSON
+        }
+        
+        return { status: response.status, external_id: externalId };
+      }
+      
+      case 'ifttt': {
+        // IFTTT Webhooks: https://ifttt.com/maker_webhooks
+        // Use this to trigger "Add to Google Keep", "Create iOS Reminder", etc.
+        const eventName = hook.event || 'mess_request';
+        const key = hook.key; // IFTTT webhook key
+        
+        if (!key) throw new Error('IFTTT hook requires "key"');
+        
+        const url = `https://maker.ifttt.com/trigger/${eventName}/with/key/${key}`;
+        
+        // IFTTT accepts value1, value2, value3
+        const body = {
+          value1: templateExpand(hook.value1 || '{{intent}}', context),
+          value2: templateExpand(hook.value2 || '{{ref}}', context),
+          value3: templateExpand(hook.value3 || '{{priority}}', context),
+        };
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        
+        return { status: response.status };
+      }
+      
+      case 'zapier': {
+        // Zapier Webhooks
+        const url = hook.webhook_url;
+        if (!url) throw new Error('Zapier hook requires "webhook_url"');
+        
+        const body = templateExpand(hook.body || {
+          intent: '{{intent}}',
+          ref: '{{ref}}',
+          priority: '{{priority}}',
+          status: '{{status}}',
+          event: '{{event}}',
+        }, context);
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        
+        return { status: response.status };
+      }
+      
+      case 'home_assistant': {
+        // Home Assistant webhook or REST API
+        const url = hook.url || `${hook.base_url}/api/webhook/${hook.webhook_id}`;
+        const headers = {};
+        
+        if (hook.token) {
+          headers['Authorization'] = `Bearer ${hook.token}`;
+        }
+        
+        const body = templateExpand(hook.body || {
+          action: 'mess_{{event}}',
+          intent: '{{intent}}',
+          ref: '{{ref}}',
+          priority: '{{priority}}',
+        }, context);
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify(body),
+        });
+        
+        return { status: response.status };
+      }
+      
+      case 'todoist': {
+        // Todoist REST API
+        const token = hook.token;
+        if (!token) throw new Error('Todoist hook requires "token"');
+        
+        const body = {
+          content: templateExpand(hook.content || 'MESS: {{intent}}', context),
+          description: templateExpand(hook.description || 'Ref: {{ref}}', context),
+          priority: hook.priority_map?.[context.priority] || 1,
+          labels: hook.labels || [],
+        };
+        
+        if (hook.project_id) body.project_id = hook.project_id;
+        if (hook.due_string) body.due_string = templateExpand(hook.due_string, context);
+        
+        const response = await fetch('https://api.todoist.com/rest/v2/tasks', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+        });
+        
+        const data = await response.json();
+        return { status: response.status, external_id: data.id };
+      }
+      
+      case 'linear': {
+        // Linear GraphQL API
+        const token = hook.token;
+        if (!token) throw new Error('Linear hook requires "token"');
+        
+        const title = templateExpand(hook.title || 'MESS: {{intent}}', context);
+        const description = templateExpand(hook.description || 'Ref: {{ref}}\nPriority: {{priority}}', context);
+        
+        const query = `
+          mutation CreateIssue($title: String!, $description: String, $teamId: String!) {
+            issueCreate(input: { title: $title, description: $description, teamId: $teamId }) {
+              issue { id identifier url }
+            }
+          }
+        `;
+        
+        const response = await fetch('https://api.linear.app/graphql', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': token,
+          },
+          body: JSON.stringify({
+            query,
+            variables: { title, description, teamId: hook.team_id },
+          }),
+        });
+        
+        const data = await response.json();
+        return {
+          status: response.status,
+          external_id: data.data?.issueCreate?.issue?.identifier,
+          url: data.data?.issueCreate?.issue?.url,
+        };
+      }
+
+      case 'google_tasks': {
+        // Google Tasks API - requires OAuth refresh token
+        if (!hook.client_id || !hook.client_secret || !hook.refresh_token) {
+          throw new Error('Google Tasks hook requires client_id, client_secret, refresh_token');
+        }
+
+        const accessToken = await getGoogleAccessToken(hook);
+        const tasklist = hook.tasklist || '@default';
+        const action = hook.action || 'create';
+
+        if (action === 'create') {
+          const title = templateExpand(hook.title || 'MESS: {{intent}}', context);
+          const notes = templateExpand(hook.notes || 'Ref: {{ref}}\nPriority: {{priority}}', context);
+
+          const body = { title, notes };
+          if (hook.due) {
+            body.due = templateExpand(hook.due, context);
+          }
+
+          const response = await fetch(
+            `https://tasks.googleapis.com/tasks/v1/lists/${tasklist}/tasks`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(body),
+            }
+          );
+
+          if (!response.ok) {
+            const text = await response.text();
+            throw new Error(`Google Tasks API error: ${response.status} ${text}`);
+          }
+
+          const data = await response.json();
+          return { status: response.status, external_id: data.id };
+
+        } else if (action === 'complete') {
+          const taskId = templateExpand(hook.task_id, context);
+          if (!taskId) {
+            throw new Error('task_id required for complete action');
+          }
+
+          const response = await fetch(
+            `https://tasks.googleapis.com/tasks/v1/lists/${tasklist}/tasks/${taskId}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ status: 'completed' }),
+            }
+          );
+
+          return { status: response.status, completed: true };
+        }
+
+        throw new Error(`Unknown google_tasks action: ${action}`);
+      }
+
+      default:
+        console.warn(`Unknown hook type: ${hook.type}`);
+        return { skipped: true };
+    }
+  }
+  
+  /**
+   * Dispatch hooks to all relevant executors
+   */
+  async function dispatchHooks(exchangeId, hookName, thread, extra = {}) {
+    const executors = await listExecutors(exchangeId);
+    
+    for (const executor of executors) {
+      // Skip executors without hooks for this event
+      if (!executor.hooks?.[hookName]?.length) continue;
+      
+      // For request-specific hooks, check if this executor should receive them
+      // (e.g., only the assigned executor gets on_request_completed)
+      if (hookName === 'on_request_completed' || hookName === 'on_request_started') {
+        if (executor.id !== thread.executor_id) continue;
+      }
+      
+      try {
+        await executeHooks(hookName, thread, executor, extra);
+      } catch (e) {
+        console.error(`Hook dispatch failed for ${executor.id}:`, e.message);
+      }
+    }
+  }
+
   // ---- Notifications ----
   
   async function dispatchNotifications(exchangeId, thread, eventType) {
@@ -322,6 +682,7 @@ export function createHandlers(storage) {
       display_name: body.display_name || body.executor_id,
       capabilities: body.capabilities || [],
       notifications: body.notifications || [],
+      hooks: body.hooks || {},
       preferences: body.preferences || {},
       api_key_hash: keyHash,
       created_at: new Date().toISOString(),
@@ -413,8 +774,19 @@ export function createHandlers(storage) {
       },
     });
     
-    const thread = { ref, intent: body.intent, priority: body.priority || 'normal', status: 'pending', requestor_id: auth.id };
+    const thread = { 
+      ref, 
+      intent: body.intent, 
+      priority: body.priority || 'normal', 
+      status: 'pending', 
+      requestor_id: auth.id,
+      created_at: now,
+      updated_at: now,
+    };
+    
+    // Dispatch notifications and hooks
     await dispatchNotifications(auth.exchange_id, thread, 'thread_created');
+    await dispatchHooks(auth.exchange_id, 'on_request_created', thread);
     
     return { data: { ref, status: 'pending' }, status: 201 };
   }
@@ -428,6 +800,7 @@ export function createHandlers(storage) {
     }
     
     const now = new Date().toISOString();
+    const oldStatus = thread.status;
     
     if (body.status && body.status !== thread.status) {
       await writeEvent({
@@ -458,9 +831,33 @@ export function createHandlers(storage) {
       });
     }
     
-    if (body.status && body.status !== thread.status) {
-      const updated = { ...thread, status: body.status };
+    if (body.status && body.status !== oldStatus) {
+      const updated = { 
+        ...thread, 
+        status: body.status,
+        executor_id: body.status === 'claimed' ? auth.id : thread.executor_id,
+        updated_at: now,
+      };
+      
+      // Dispatch notifications
       await dispatchNotifications(auth.exchange_id, updated, 'status_changed');
+      
+      // Dispatch appropriate hooks based on status change
+      const hookMap = {
+        'claimed': 'on_request_claimed',
+        'in-progress': 'on_request_started',
+        'completed': 'on_request_completed',
+        'rejected': 'on_request_rejected',
+        'cancelled': 'on_request_cancelled',
+      };
+      
+      const hookName = hookMap[body.status];
+      if (hookName) {
+        await dispatchHooks(auth.exchange_id, hookName, updated, { 
+          old_status: oldStatus,
+          actor_id: auth.id,
+        });
+      }
     }
     
     return { data: { ref, status: body.status || thread.status }, status: 200 };
@@ -493,12 +890,90 @@ export function createHandlers(storage) {
     if (body.display_name) executor.display_name = body.display_name;
     if (body.capabilities) executor.capabilities = body.capabilities;
     if (body.notifications) executor.notifications = body.notifications;
+    if (body.hooks) executor.hooks = body.hooks;
     if (body.preferences) executor.preferences = body.preferences;
     executor.last_seen = new Date().toISOString();
     
     await putExecutor(auth.exchange_id, executor);
-    
+
     return { data: { executor_id: executor.id, updated: true }, status: 200 };
+  }
+
+  // ---- Import/Export Handlers ----
+
+  /**
+   * Import a MESSE-AF thread
+   * Accepts either:
+   * - YAML string (v1 flat file format)
+   * - Array of {name, content} objects (v2 directory format)
+   */
+  async function handleImportThread(auth, body) {
+    // Check if storage supports MESSE-AF import
+    if (typeof storage.importThread !== 'function') {
+      return {
+        error: 'Import not supported in event-sourced mode. Set STORAGE_MODE=messe-af',
+        status: 400
+      };
+    }
+
+    if (!body.content && !body.files) {
+      return { error: 'content or files required', status: 400 };
+    }
+
+    try {
+      const input = body.files || body.content;
+      const result = await storage.importThread(auth.exchange_id, input);
+
+      return {
+        data: {
+          imported: 1,
+          threads: [result]
+        },
+        status: 201
+      };
+    } catch (e) {
+      return { error: `Import failed: ${e.message}`, status: 400 };
+    }
+  }
+
+  /**
+   * Export a thread to MESSE-AF format
+   * @param {Object} auth - Authenticated executor
+   * @param {string} ref - Thread reference
+   * @param {Object} query - Query options (format: 'yaml' | 'zip')
+   */
+  async function handleExportThread(auth, ref, query = {}) {
+    // Check if storage supports MESSE-AF export
+    if (typeof storage.exportThread !== 'function') {
+      return {
+        error: 'Export not supported in event-sourced mode. Set STORAGE_MODE=messe-af',
+        status: 400
+      };
+    }
+
+    const format = query.format === 'v1' ? 'v1' : 'v2';
+
+    try {
+      const result = await storage.exportThread(auth.exchange_id, ref, format);
+
+      if (!result) {
+        return { error: 'Thread not found', status: 404 };
+      }
+
+      // For v2, result is array of files
+      // For v1, result is YAML string
+      return {
+        data: {
+          ref,
+          format,
+          files: Array.isArray(result) ? result : undefined,
+          content: typeof result === 'string' ? result : undefined
+        },
+        status: 200
+      };
+    } catch (e) {
+      return { error: `Export failed: ${e.message}`, status: 500 };
+    }
   }
 
   return {
@@ -510,5 +985,10 @@ export function createHandlers(storage) {
     handleUpdateRequest,
     handleListExecutors,
     handleUpdateExecutor,
+    handleImportThread,
+    handleExportThread,
+    // Expose for testing/advanced use
+    executeHooks,
+    templateExpand,
   };
 }

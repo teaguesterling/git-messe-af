@@ -1,31 +1,36 @@
 /**
  * MESS Exchange Server - Express.js Adapter
  * Entry point for self-hosted deployments (Docker, Kubernetes, bare metal)
- * 
+ *
  * Usage:
  *   node src/adapters/express.js
- * 
+ *
  * Environment:
  *   PORT=3000
  *   STORAGE_TYPE=filesystem|s3
+ *   STORAGE_MODE=event-sourced|messe-af
+ *   MESSE_AF_VERSION=1|2 (for messe-af mode)
  *   STORAGE_PATH=./data (for filesystem)
  *   S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY (for s3)
+ *   BLOB_STORAGE_TYPE=s3|filesystem (optional separate blob storage)
  */
 
 import express from 'express';
 import cors from 'cors';
-import { createStorageFromEnv } from '../storage/index.js';
+import { createStorageFromEnv, getStorageDescription } from '../storage/index.js';
 import { createHandlers } from '../core.js';
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(express.text({ type: ['application/yaml', 'text/yaml'], limit: '10mb' }));
 
 // Initialize storage and handlers
 const storage = await createStorageFromEnv();
 const handlers = createHandlers(storage);
 
-console.log(`Storage backend: ${storage.type}`);
+const storageDesc = getStorageDescription(storage);
+console.log(`Storage backend: ${storageDesc}`);
 
 // ============ Middleware ============
 
@@ -57,7 +62,12 @@ function validateExchange(req, res, next) {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'mess-exchange', storage: storage.type });
+  res.json({
+    status: 'ok',
+    service: 'mess-exchange',
+    storage: storageDesc,
+    mode: process.env.STORAGE_MODE || 'event-sourced'
+  });
 });
 
 // Register (no auth required)
@@ -151,6 +161,51 @@ app.patch('/api/v1/exchanges/:exchangeId/executors/:executorId', async (req, res
     res.status(result.status).json(result.data);
   } catch (e) {
     console.error('Update executor error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Import thread (MESSE-AF format)
+app.post('/api/v1/exchanges/:exchangeId/import', async (req, res) => {
+  try {
+    let body = req.body;
+
+    // Handle YAML content type
+    if (typeof req.body === 'string') {
+      body = { content: req.body };
+    }
+
+    const result = await handlers.handleImportThread(req.auth, body);
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
+    }
+    res.status(result.status).json(result.data);
+  } catch (e) {
+    console.error('Import error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Export thread (MESSE-AF format)
+app.get('/api/v1/exchanges/:exchangeId/export/:ref', async (req, res) => {
+  try {
+    const result = await handlers.handleExportThread(req.auth, req.params.ref, req.query);
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    // If YAML format requested, return as YAML
+    const acceptYaml = req.accepts(['json', 'yaml', 'text/yaml', 'application/yaml']);
+    if (acceptYaml === 'yaml' || acceptYaml === 'text/yaml' || acceptYaml === 'application/yaml') {
+      if (result.data.content) {
+        res.type('application/yaml').send(result.data.content);
+        return;
+      }
+    }
+
+    res.status(result.status).json(result.data);
+  } catch (e) {
+    console.error('Export error:', e);
     res.status(500).json({ error: e.message });
   }
 });
