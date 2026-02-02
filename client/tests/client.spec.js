@@ -1064,3 +1064,84 @@ test.describe('File Attachment', () => {
     expect(responseContent).toContain('type: application/pdf');
   });
 });
+
+// ============ PWA Tests ============
+test.describe('PWA Support', () => {
+  test('serves manifest.json correctly', async ({ page }) => {
+    const response = await page.request.get('/manifest.json');
+    expect(response.ok()).toBe(true);
+    const manifest = await response.json();
+    expect(manifest.name).toBe('MESS Exchange');
+    expect(manifest.short_name).toBe('MESS');
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.icons).toHaveLength(2);
+  });
+
+  test('includes PWA meta tags', async ({ page }) => {
+    await page.goto('/');
+
+    // Check manifest link
+    const manifestLink = page.locator('link[rel="manifest"]');
+    await expect(manifestLink).toHaveAttribute('href', './manifest.json');
+
+    // Check theme-color
+    const themeColor = page.locator('meta[name="theme-color"]');
+    await expect(themeColor).toHaveAttribute('content', '#22c55e');
+
+    // Check apple meta tags
+    const appleCapable = page.locator('meta[name="apple-mobile-web-app-capable"]');
+    await expect(appleCapable).toHaveAttribute('content', 'yes');
+
+    const appleTitle = page.locator('meta[name="apple-mobile-web-app-title"]');
+    await expect(appleTitle).toHaveAttribute('content', 'MESS');
+  });
+
+  test('service worker is registered', async ({ page }) => {
+    await page.goto('/');
+    await setupConfig(page);
+    await setupGitHubMocks(page);
+    await page.reload();
+
+    // Wait for service worker registration
+    await page.waitForTimeout(500);
+
+    // Check if service worker is registered
+    const swRegistered = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return false;
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      return registrations.length > 0;
+    });
+
+    expect(swRegistered).toBe(true);
+  });
+
+  test('icon files exist', async ({ page }) => {
+    // Check 192x192 icon
+    const icon192 = await page.request.get('/icons/icon-192.png');
+    expect(icon192.ok()).toBe(true);
+    expect(icon192.headers()['content-type']).toContain('image/png');
+
+    // Check 512x512 icon
+    const icon512 = await page.request.get('/icons/icon-512.png');
+    expect(icon512.ok()).toBe(true);
+    expect(icon512.headers()['content-type']).toContain('image/png');
+  });
+
+  test('service worker caches static assets', async ({ page, context }) => {
+    await page.goto('/');
+    await setupConfig(page);
+    await setupGitHubMocks(page);
+    await page.reload();
+
+    // Wait for service worker to install and cache assets
+    await page.waitForTimeout(1000);
+
+    // Verify cache was created
+    const cacheExists = await page.evaluate(async () => {
+      const caches = await window.caches.keys();
+      return caches.some(name => name.startsWith('mess-'));
+    });
+
+    expect(cacheExists).toBe(true);
+  });
+});

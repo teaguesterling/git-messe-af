@@ -1,0 +1,40 @@
+{
+  "name": "MESS Exchange",
+  "short_name": "MESS",
+  "description": "Meatspace Execution and Submission System - AI-to-human task dispatch",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f172a",
+  "theme_color": "#22c55e",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Inbox",
+      "short_name": "Inbox",
+      "description": "View pending requests",
+      "url": "./index.html?folder=received"
+    },
+    {
+      "name": "Active",
+      "short_name": "Active",
+      "description": "View claimed requests",
+      "url": "./index.html?folder=executing"
+    }
+  ]
+}
