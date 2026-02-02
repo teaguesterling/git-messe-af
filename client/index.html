@@ -361,18 +361,19 @@
     }
 
     // ============ Capability Definitions ============
+    // IDs use kebab-case per protocol recommendation
     const CAPABILITIES = {
       physical: {
         label: 'Physical Tasks',
         icon: '🏃',
         color: 'orange',
         items: {
-          'check:visual': { label: 'Visual checks', desc: 'Look at something, read a display' },
-          'check:physical': { label: 'Physical inspection', desc: 'Touch, open, measure' },
-          'fetch:indoor': { label: 'Fetch items (indoor)', desc: 'Get something from another room' },
-          'fetch:outdoor': { label: 'Fetch items (outdoor)', desc: 'Pick up packages, check mailbox' },
-          'operate:appliance': { label: 'Operate appliances', desc: 'Thermostat, washer, coffee maker' },
-          'operate:vehicle': { label: 'Vehicle tasks', desc: 'Drive, check car status' },
+          'check-visual': { label: 'Visual checks', desc: 'Look at something, read a display' },
+          'check-physical': { label: 'Physical inspection', desc: 'Touch, open, measure' },
+          'fetch-indoor': { label: 'Fetch items (indoor)', desc: 'Get something from another room' },
+          'fetch-outdoor': { label: 'Fetch items (outdoor)', desc: 'Pick up packages, check mailbox' },
+          'operate-appliance': { label: 'Operate appliances', desc: 'Thermostat, washer, coffee maker' },
+          'operate-vehicle': { label: 'Vehicle tasks', desc: 'Drive, check car status' },
         }
       },
       communication: {
@@ -380,9 +381,9 @@
         icon: '💬',
         color: 'blue',
         items: {
-          'call:phone': { label: 'Phone calls', desc: 'Make or receive calls' },
-          'message:text': { label: 'Text messages', desc: 'Send SMS/texts' },
-          'interact:person': { label: 'In-person interaction', desc: 'Talk to delivery, neighbors' },
+          'make-phone-call': { label: 'Phone calls', desc: 'Make or receive calls' },
+          'send-text-message': { label: 'Text messages', desc: 'Send SMS/texts' },
+          'in-person-interaction': { label: 'In-person interaction', desc: 'Talk to delivery, neighbors' },
         }
       },
       information: {
@@ -390,9 +391,9 @@
         icon: '📋',
         color: 'purple',
         items: {
-          'photo:capture': { label: 'Take photos', desc: 'Capture and send images' },
-          'read:document': { label: 'Read documents', desc: 'Physical mail, papers' },
-          'research:local': { label: 'Local research', desc: 'Check store hours, availability' },
+          'take-photo': { label: 'Take photos', desc: 'Capture and send images' },
+          'read-document': { label: 'Read documents', desc: 'Physical mail, papers' },
+          'local-research': { label: 'Local research', desc: 'Check store hours, availability' },
         }
       },
       care: {
@@ -400,12 +401,35 @@
         icon: '🌱',
         color: 'green',
         items: {
-          'care:plant': { label: 'Plant care', desc: 'Water, prune, check' },
-          'care:pet': { label: 'Pet care', desc: 'Feed, walk, check on' },
-          'care:child': { label: 'Child supervision', desc: 'Check on, assist' },
+          'plant-care': { label: 'Plant care', desc: 'Water, prune, check' },
+          'pet-care': { label: 'Pet care', desc: 'Feed, walk, check on' },
+          'child-supervision': { label: 'Child supervision', desc: 'Check on, assist' },
         }
       }
     };
+
+    // Get all predefined capability IDs for filtering custom ones
+    function getPredefinedCapabilities() {
+      const ids = [];
+      for (const cat of Object.values(CAPABILITIES)) {
+        ids.push(...Object.keys(cat.items));
+      }
+      return ids;
+    }
+
+    // Parse custom capabilities from comma-separated string
+    function parseCustomCapabilities(str) {
+      if (!str) return [];
+      return str.split(',')
+        .map(s => s.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''))
+        .filter(s => s.length > 0);
+    }
+
+    // Get custom capabilities from array (excludes predefined ones)
+    function getCustomCapabilities(caps) {
+      const predefined = getPredefinedCapabilities();
+      return (caps || []).filter(c => !predefined.includes(c));
+    }
 
     // ============ Size Limits (v2 format) ============
     const MAX_FILE_SIZE = 1024 * 1024;        // 1 MB - GitHub Contents API limit
@@ -1350,6 +1374,46 @@
           await this.putFile(path, content, `Register executor: ${config.executor_id}`);
         }
       }
+
+      // Fetch exchange-defined capabilities from capabilities/ directory
+      async getExchangeCapabilities() {
+        try {
+          const tree = await this.getFullTree();
+          const capFiles = tree.tree.filter(t =>
+            t.path.startsWith('capabilities/') && t.path.endsWith('.yaml') && t.type === 'blob'
+          );
+
+          if (capFiles.length === 0) return [];
+
+          const paths = capFiles.map(f => f.path);
+          const contents = await this.getFilesBatch(paths);
+
+          const capabilities = [];
+          for (const path of paths) {
+            const content = contents[path];
+            if (!content) continue;
+
+            // Parse multi-doc YAML (capabilities separated by ---)
+            const docs = content.split(/^---$/m).filter(d => d.trim());
+            for (const doc of docs) {
+              try {
+                const cap = jsyaml.load(doc);
+                if (cap && cap.id) {
+                  capabilities.push({
+                    id: cap.id,
+                    description: cap.description || '',
+                    tags: cap.tags || []
+                  });
+                }
+              } catch (e) { /* skip invalid docs */ }
+            }
+          }
+          return capabilities;
+        } catch (e) {
+          console.log('Could not load exchange capabilities:', e.message);
+          return [];
+        }
+      }
     }
 
     // ============ App State ============
@@ -1365,6 +1429,13 @@
       setupStep: 1,
       connectionTest: null,
       showNewRequest: false,
+      // Exchange-defined capabilities from capabilities/ directory (loaded on demand)
+      exchangeCapabilities: [],
+      // Thread filters
+      filters: {
+        capableOnly: false,  // Show only threads matching my capabilities
+        myClaimsOnly: false, // Show only threads I've claimed (executing tab)
+      },
       // Track recently modified threads to preserve during refresh
       recentlyModified: new Map(), // ref -> { folder, thread, expires }
       // Pending attachments for response
@@ -1612,8 +1683,13 @@
                 </div>
               `).join('')}
             </div>
+            <div class="mt-3">
+              <label class="text-xs text-muted mb-1" style="display:block">Custom capabilities (comma-separated)</label>
+              <input type="text" id="input-custom-caps" value="${getCustomCapabilities(savedCaps).join(', ')}"
+                placeholder="e.g., garage-door-access, vacuum-floor" class="input text-sm">
+            </div>
           </div>
-          
+
           <label class="flex items-center gap-3 p-3 bg-hover rounded-xl cursor-pointer">
             <input type="checkbox" id="input-can-request" ${state.config?.canRequest !== false ? 'checked' : ''}>
             <div>
@@ -1717,6 +1793,11 @@
                     </div>
                   </div>
                 `).join('')}
+              </div>
+              <div class="mt-3 pt-3 border-t">
+                <label class="text-xs text-muted mb-1" style="display:block">Custom capabilities (comma-separated)</label>
+                <input type="text" id="settings-custom-caps" value="${getCustomCapabilities(savedCaps).join(', ')}"
+                  placeholder="e.g., garage-door-access, vacuum-floor" class="input text-sm">
               </div>
             </div>
             
@@ -1858,16 +1939,48 @@
       return configs[type] || '';
     }
 
+    // Filter threads based on current filter settings
+    function filterThreads(threads) {
+      let filtered = threads;
+      const myCaps = state.config?.capabilities || [];
+      const myId = state.config?.executorId;
+
+      if (state.filters.capableOnly && myCaps.length > 0) {
+        filtered = filtered.filter(t => {
+          const requires = t.messages?.[0]?.MESS?.find(m => m.request)?.request?.requires || [];
+          // Show if no requirements or if I have at least one matching capability
+          if (requires.length === 0) return true;
+          const reqIds = requires.map(r => typeof r === 'string' ? r : Object.keys(r)[0]);
+          return reqIds.some(req => myCaps.includes(req));
+        });
+      }
+
+      if (state.filters.myClaimsOnly && myId) {
+        filtered = filtered.filter(t => {
+          // Check if any status message shows this executor claimed it
+          return t.messages?.some(m =>
+            m.MESS?.some(item => item.status?.executor === myId)
+          );
+        });
+      }
+
+      return filtered;
+    }
+
     function renderMain() {
+      const allThreads = state.threads[state.currentFolder] || [];
+      const threads = filterThreads(allThreads);
+      const filteredCount = allThreads.length - threads.length;
+
       const folders = [
         { key: 'received', label: 'Inbox', icon: '📥', count: state.threads.received?.length },
         { key: 'executing', label: 'Active', icon: '▶️', count: state.threads.executing?.length },
         { key: 'finished', label: 'Done', icon: '✅', count: state.threads.finished?.length },
         { key: 'canceled', label: 'Closed', icon: '❌', count: state.threads.canceled?.length }
       ];
-      
-      const threads = state.threads[state.currentFolder] || [];
+
       const canRequest = state.config?.canRequest !== false;
+      const hasFilters = state.filters.capableOnly || state.filters.myClaimsOnly;
       
       return `
         <div class="h-screen flex flex-col bg-page">
@@ -1916,7 +2029,25 @@
               </button>
             `).join('')}
           </div>
-          
+
+          <!-- Filters -->
+          <div class="flex items-center gap-2 px-3 py-2 bg-card border-b text-sm">
+            <span class="text-muted">Filter:</span>
+            <label class="chip ${state.filters.capableOnly ? 'selected' : ''}" style="font-size:0.75rem">
+              <input type="checkbox" id="filter-capable" class="sr-only" ${state.filters.capableOnly ? 'checked' : ''}>
+              My capabilities
+            </label>
+            ${state.currentFolder === 'executing' ? `
+              <label class="chip ${state.filters.myClaimsOnly ? 'selected' : ''}" style="font-size:0.75rem">
+                <input type="checkbox" id="filter-my-claims" class="sr-only" ${state.filters.myClaimsOnly ? 'checked' : ''}>
+                My claims only
+              </label>
+            ` : ''}
+            ${hasFilters && filteredCount > 0 ? `
+              <span class="text-xs text-muted ml-auto">${filteredCount} hidden</span>
+            ` : ''}
+          </div>
+
           <!-- Thread List -->
           <div class="flex-1 overflow-y-auto">
             ${state.loading && threads.length === 0 ? `
@@ -2257,8 +2388,10 @@
         const executorId = document.getElementById('input-executor-id').value.trim();
         const displayName = document.getElementById('input-display-name').value.trim();
         const canRequest = document.getElementById('input-can-request').checked;
-        const capabilities = Array.from(document.querySelectorAll('.cap-checkbox:checked')).map(el => el.dataset.cap);
-        
+        const predefinedCaps = Array.from(document.querySelectorAll('.cap-checkbox:checked')).map(el => el.dataset.cap);
+        const customCaps = parseCustomCapabilities(document.getElementById('input-custom-caps')?.value || '');
+        const capabilities = [...new Set([...predefinedCaps, ...customCaps])];
+
         if (!executorId) { state.error = 'Please enter an executor name'; render(); return; }
         
         state.config = { ...state.config, executorId, displayName: displayName || executorId, canRequest, capabilities };
@@ -2316,7 +2449,9 @@
       });
       
       document.getElementById('save-settings')?.addEventListener('click', async () => {
-        const capabilities = Array.from(document.querySelectorAll('.settings-cap:checked')).map(el => el.dataset.cap);
+        const predefinedCaps = Array.from(document.querySelectorAll('.settings-cap:checked')).map(el => el.dataset.cap);
+        const customCaps = parseCustomCapabilities(document.getElementById('settings-custom-caps')?.value || '');
+        const capabilities = [...new Set([...predefinedCaps, ...customCaps])];
         const quietHoursEnabled = document.getElementById('settings-quiet-hours')?.checked;
         
         state.config = {
@@ -2406,19 +2541,30 @@
       document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
       document.getElementById('open-settings')?.addEventListener('click', () => { state.view = 'settings'; render(); });
       document.getElementById('new-request')?.addEventListener('click', () => { state.showNewRequest = true; render(); });
-      
+
+      // Filter toggles
+      document.getElementById('filter-capable')?.addEventListener('change', (e) => {
+        state.filters.capableOnly = e.target.checked;
+        render();
+      });
+      document.getElementById('filter-my-claims')?.addEventListener('change', (e) => {
+        state.filters.myClaimsOnly = e.target.checked;
+        render();
+      });
+
       document.querySelectorAll('[data-folder]').forEach(tab => {
         tab.addEventListener('click', () => { state.currentFolder = tab.dataset.folder; state.selectedThread = null; render(); });
       });
-      
+
       document.querySelectorAll('.thread-row').forEach(row => {
         row.addEventListener('click', (e) => {
           if (e.target.closest('.quick-claim')) return;
-          state.selectedThread = state.threads[state.currentFolder].find(t => t.ref === row.dataset.ref);
+          const allThreads = state.threads[state.currentFolder] || [];
+          state.selectedThread = allThreads.find(t => t.ref === row.dataset.ref);
           render();
         });
       });
-      
+
       document.querySelectorAll('.quick-claim').forEach(btn => {
         btn.addEventListener('click', async (e) => { e.stopPropagation(); await handleAction('claim', btn.dataset.ref); });
       });
