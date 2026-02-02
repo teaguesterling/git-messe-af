@@ -934,7 +934,7 @@
         return { ref, status: 'pending' };
       }
 
-      async updateThread(thread, from, mess, newStatus = null) {
+      async updateThread(thread, from, mess, newStatus = null, retries = 3) {
         const now = new Date().toISOString();
         const envelope = { ...thread.envelope };
         const messages = [...thread.messages, { from, received: now, channel: 'github', MESS: mess }];
@@ -951,65 +951,80 @@
 
         const newFolder = this.getFolder(envelope.status);
         const files = this.serializeThread(envelope, messages, attachments);
+        const needsMove = newFolder !== oldFolder;
+        const newDirPath = `exchange/state=${newFolder}/${envelope.ref}`;
+        const commitMessage = `${envelope.ref}: ${newStatus || 'Update'}${thread._format === 'v1' ? ' (upgraded to v2)' : ''}`;
 
-        // Handle v1 format - upgrade to v2 on modification
-        if (thread._format === 'v1') {
-          const newDirPath = `exchange/state=${newFolder}/${envelope.ref}`;
+        // All updates now use a single atomic commit with retry logic
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          try {
+            const refData = await this.request('/git/ref/heads/main');
+            const currentCommitSha = refData.object.sha;
+            const commitData = await this.request(`/git/commits/${currentCommitSha}`);
+            const baseTreeSha = commitData.tree.sha;
 
-          // Use Git Data API to create directory and delete old file atomically
-          const refData = await this.request('/git/ref/heads/main');
-          const currentCommitSha = refData.object.sha;
-          const commitData = await this.request(`/git/commits/${currentCommitSha}`);
-          const baseTreeSha = commitData.tree.sha;
+            const treeEntries = [];
 
-          const treeEntries = [
-            // Delete old v1 file
-            { path: thread._path, mode: '100644', type: 'blob', sha: null },
-            // Create new v2 files
-            ...files.map(f => ({
-              path: `${newDirPath}/${f.name}`,
-              mode: '100644',
-              type: 'blob',
-              content: f.binary ? atob(f.content) : f.content
-            }))
-          ];
+            // Handle v1 format - delete old file
+            if (thread._format === 'v1') {
+              treeEntries.push({ path: thread._path, mode: '100644', type: 'blob', sha: null });
+            }
+            // Handle v2 format with move - delete old files
+            else if (needsMove) {
+              const oldFiles = await this.getDirectory(thread._path);
+              if (oldFiles) {
+                for (const file of oldFiles) {
+                  treeEntries.push({
+                    path: `${thread._path}/${file.name}`,
+                    mode: '100644',
+                    type: 'blob',
+                    sha: null
+                  });
+                }
+              }
+            }
 
-          const treeData = await this.request('/git/trees', {
-            method: 'POST',
-            body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
-          });
+            // Add new/updated files at destination
+            const destPath = (thread._format === 'v1' || needsMove) ? newDirPath : thread._path;
+            for (const f of files) {
+              treeEntries.push({
+                path: `${destPath}/${f.name}`,
+                mode: '100644',
+                type: 'blob',
+                content: f.binary ? atob(f.content) : f.content
+              });
+            }
 
-          const newCommit = await this.request('/git/commits', {
-            method: 'POST',
-            body: JSON.stringify({
-              message: `${envelope.ref}: ${newStatus || 'Update'} (upgraded to v2)`,
-              tree: treeData.sha,
-              parents: [currentCommitSha]
-            })
-          });
+            const treeData = await this.request('/git/trees', {
+              method: 'POST',
+              body: JSON.stringify({ base_tree: baseTreeSha, tree: treeEntries })
+            });
 
-          await this.request('/git/refs/heads/main', {
-            method: 'PATCH',
-            body: JSON.stringify({ sha: newCommit.sha })
-          });
+            const newCommit = await this.request('/git/commits', {
+              method: 'POST',
+              body: JSON.stringify({
+                message: commitMessage,
+                tree: treeData.sha,
+                parents: [currentCommitSha]
+              })
+            });
 
-          return envelope;
+            await this.request('/git/refs/heads/main', {
+              method: 'PATCH',
+              body: JSON.stringify({ sha: newCommit.sha })
+            });
+
+            return envelope;
+          } catch (e) {
+            const isConflict = e.message.includes('fast forward') || e.message.includes('422');
+            if (isConflict && attempt < retries) {
+              console.log(`[GitHub] Retry ${attempt}/${retries} after conflict...`);
+              await new Promise(r => setTimeout(r, 500 * attempt));
+              continue;
+            }
+            throw e;
+          }
         }
-
-        // Handle v2 format
-        if (newFolder !== oldFolder) {
-          // Move directory
-          const newDirPath = `exchange/state=${newFolder}/${envelope.ref}`;
-
-          // First update files, then move
-          await this.updateDirectoryFiles(thread._path, files, `Update: ${envelope.intent}`);
-          await this.moveDirectory(thread._path, newDirPath, `${newStatus}: ${envelope.intent}`);
-        } else {
-          // Just update files in place
-          await this.updateDirectoryFiles(thread._path, files, `Update: ${envelope.intent}`);
-        }
-
-        return envelope;
       }
 
       getFolder(status) {
@@ -2465,18 +2480,31 @@
       const oldFolder = state.currentFolder;
       const newFolder = state.github.getFolder(newStatus);
 
-      // Close detail view and show loading
-      state.selectedThread = null;
+      // For claim action, stay on detail view and show response form immediately
+      // For other actions, close detail view
+      const stayOnDetail = (action === 'claim');
+
+      if (!stayOnDetail) {
+        state.selectedThread = null;
+      }
       state.loading = true;
 
       // Move thread locally for instant feedback
+      let updatedThread = thread;
       if (newStatus && newFolder !== oldFolder) {
-        moveThreadLocally(thread, oldFolder, newFolder, newStatus);
+        updatedThread = moveThreadLocally(thread, oldFolder, newFolder, newStatus);
+        // Switch to new folder so user sees the thread
+        if (stayOnDetail) {
+          state.currentFolder = newFolder;
+        }
       } else if (newStatus) {
         // Update in place if staying in same folder
         const idx = state.threads[oldFolder].findIndex(t => t.ref === thread.ref);
         if (idx !== -1) {
-          const updatedThread = { ...thread, status: newStatus, updated: new Date().toISOString() };
+          updatedThread = { ...thread, status: newStatus, updated: new Date().toISOString() };
+          if (updatedThread.envelope) {
+            updatedThread.envelope = { ...updatedThread.envelope, status: newStatus };
+          }
           state.threads[oldFolder][idx] = updatedThread;
           // Track this modification to preserve during refresh
           state.recentlyModified.set(thread.ref, {
@@ -2487,22 +2515,31 @@
         }
       }
 
+      // Keep selected thread updated if staying on detail
+      if (stayOnDetail) {
+        state.selectedThread = updatedThread;
+      }
+
       render();
 
       try {
         await state.github.updateThread(thread, state.config.executorId, mess, newStatus);
+        state.loading = false;
+        render();
         // Background refresh to sync with server (don't block UI)
         refresh().catch(e => console.error('Background refresh failed:', e));
       } catch (e) {
         console.error(e);
-        alert('Action failed: ' + e.message);
+        state.loading = false;
+        // Show error but don't alert() which is disruptive - use a toast or inline message
+        state.error = 'Action failed: ' + e.message;
         // Clear optimistic tracking so refresh gets actual state
         state.recentlyModified.delete(thread.ref);
         // Revert optimistic update on failure - do a full refresh
         await refresh();
+        // Clear error after refresh shows actual state
+        setTimeout(() => { state.error = null; render(); }, 3000);
       }
-
-      state.loading = false; render();
     }
 
     function formatTime(isoString) {
