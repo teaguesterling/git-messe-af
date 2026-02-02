@@ -1431,10 +1431,10 @@
       showNewRequest: false,
       // Exchange-defined capabilities from capabilities/ directory (loaded on demand)
       exchangeCapabilities: [],
-      // Thread filters (capableOnly and myClaimsOnly default to on)
+      // Thread filters (all off by default - user can enable as needed)
       filters: {
-        capableOnly: true,       // Show only threads matching my capabilities
-        myClaimsOnly: true,      // Show only threads I've claimed (executing tab)
+        capableOnly: false,      // Show only threads matching my capabilities
+        myClaimsOnly: false,     // Show only threads I've claimed (executing tab)
         awaitingAnswer: false,   // Show threads with needs_input status (awaiting requestor answer)
         hasNewAnswer: false,     // Show threads that have a reply after needs_input
       },
@@ -2010,7 +2010,10 @@
 
       if (state.filters.capableOnly && myCaps.length > 0) {
         filtered = filtered.filter(t => {
-          const requires = t.messages?.[0]?.MESS?.find(m => m.request)?.request?.requires || [];
+          // If messages not loaded yet, show the thread
+          if (!t.messages || t.messages.length === 0) return true;
+          const requestMsg = t.messages[0]?.MESS?.find(m => m.request);
+          const requires = requestMsg?.request?.requires || [];
           // Show if no requirements or if I have at least one matching capability
           if (requires.length === 0) return true;
           const reqIds = requires.map(r => typeof r === 'string' ? r : Object.keys(r)[0]);
