@@ -331,8 +331,8 @@ test.describe('Main View', () => {
     // Click on thread
     await page.click('.thread-row');
 
-    // Should show detail view
-    await expect(page.locator('text=Back')).toBeVisible();
+    // Should show detail view with close button and claim action
+    await expect(page.locator('#back')).toBeVisible();
     await expect(page.locator('text=Claim This Request')).toBeVisible();
   });
 });
@@ -610,7 +610,7 @@ test.describe('Create Request', () => {
     await expect(page.locator('text=Inbox')).toBeVisible({ timeout: 5000 });
 
     // Click new request button
-    await page.click('text=+ New');
+    await page.click('#new-request');
 
     // Should show modal
     await expect(page.locator('text=New Request')).toBeVisible();
@@ -642,7 +642,7 @@ test.describe('Create Request', () => {
     await page.reload();
     await expect(page.locator('text=Inbox')).toBeVisible({ timeout: 5000 });
 
-    await page.click('text=+ New');
+    await page.click('#new-request');
     await expect(page.locator('text=New Request')).toBeVisible();
 
     await page.fill('#new-intent', 'Test request intent');
@@ -661,7 +661,7 @@ test.describe('Create Request', () => {
     await expect(page.locator('text=Inbox')).toBeVisible({ timeout: 5000 });
 
     // New button should not be visible
-    await expect(page.locator('text=+ New')).not.toBeVisible();
+    await expect(page.locator('#new-request')).not.toBeVisible();
   });
 });
 

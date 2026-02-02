@@ -2013,7 +2013,7 @@
             </button>
             ${canRequest ? `
               <button id="new-request" class="btn btn-primary btn-sm" title="New Request">
-                <span class="hidden-sm">+ New</span>
+                <span class="hidden-sm">New</span>
                 <span class="show-sm">+</span>
               </button>
             ` : ''}
@@ -2129,16 +2129,19 @@
         <div class="h-screen flex flex-col bg-page">
           <!-- Header -->
           <div class="glass p-4">
-            <button id="back" class="flex items-center gap-2 text-secondary mb-3" style="cursor:pointer">
-              <svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
-              </svg>
-              Back
-            </button>
-            <h2 class="text-lg font-bold text-primary">${t.intent}</h2>
-            <p class="text-sm text-muted mt-1">
-              <span class="mono">${t.ref}</span> · from ${t.requestor}${t.executor ? ` · ${t.executor}` : ''}
-            </p>
+            <div class="flex items-start gap-3">
+              <div class="flex-1 min-w-0">
+                <h2 class="text-lg font-bold text-primary">${t.intent}</h2>
+                <p class="text-sm text-muted mt-1">
+                  <span class="mono">${t.ref}</span> · from ${t.requestor}${t.executor ? ` · ${t.executor}` : ''}
+                </p>
+              </div>
+              <button id="back" class="btn btn-ghost p-2" title="Close">
+                <svg style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
           </div>
           
           <!-- Messages -->
@@ -2236,6 +2239,41 @@
       `;
     }
 
+    // Render all request fields, including non-standard ones
+    function renderRequestContent(req) {
+      const knownFields = ['intent', 'context', 'response_hint', 'requires', 'priority', 're', 'requestor'];
+      const extraFields = Object.keys(req).filter(k => !knownFields.includes(k));
+
+      let html = `<p class="font-medium text-primary">${req.intent}</p>`;
+
+      if (req.context) {
+        html += `<ul class="mt-2 text-sm text-secondary space-y-1">${req.context.map(c => `<li class="flex gap-2"><span class="text-muted">•</span> ${c}</li>`).join('')}</ul>`;
+      }
+
+      if (req.priority && req.priority !== 'normal') {
+        const colors = { urgent: 'text-red', elevated: 'text-amber', background: 'text-muted' };
+        html += `<p class="mt-2 text-sm ${colors[req.priority] || 'text-secondary'}">Priority: ${req.priority}</p>`;
+      }
+
+      if (req.requires && req.requires.length > 0) {
+        const caps = req.requires.map(r => typeof r === 'string' ? r : Object.keys(r)[0]);
+        html += `<p class="mt-2 text-xs text-muted">Requires: ${caps.join(', ')}</p>`;
+      }
+
+      if (req.response_hint) {
+        html += `<p class="mt-2 text-xs text-muted flex items-center gap-1"><span>📎</span> Wants: ${req.response_hint.join(', ')}</p>`;
+      }
+
+      // Render any additional/custom fields
+      for (const field of extraFields) {
+        const value = req[field];
+        const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+        html += `<p class="mt-2 text-xs text-muted"><span class="text-secondary">${field}:</span> ${displayValue}</p>`;
+      }
+
+      return html;
+    }
+
     function renderMessage(msg) {
       const isAgent = msg.from?.includes('agent') || msg.from?.includes('claude');
       const isExchange = msg.from === 'exchange';
@@ -2244,7 +2282,7 @@
         const key = Object.keys(item)[0];
         content[key] = item[key];
       });
-      
+
       const align = isAgent || isExchange ? '' : 'justify-end';
       const bgClass = isAgent ? 'bg-blue-light' : isExchange ? 'bg-gray-light' : 'bg-mess-light';
       const icon = isAgent ? '🤖' : isExchange ? '📨' : '👤';
@@ -2258,11 +2296,7 @@
               <span class="text-xs text-muted">${formatTime(msg.received)}</span>
             </div>
             <div class="rounded-2xl p-4 ${bgClass} border">
-              ${content.request ? `
-                <p class="font-medium text-primary">${content.request.intent}</p>
-                ${content.request.context ? `<ul class="mt-2 text-sm text-secondary space-y-1">${content.request.context.map(c => `<li class="flex gap-2"><span class="text-muted">•</span> ${c}</li>`).join('')}</ul>` : ''}
-                ${content.request.response_hint ? `<p class="mt-3 text-xs text-muted flex items-center gap-1"><span>📎</span> Wants: ${content.request.response_hint.join(', ')}</p>` : ''}
-              ` : ''}
+              ${content.request ? renderRequestContent(content.request) : ''}
               ${content.ack ? `<p class="text-sm text-secondary">✓ Acknowledged as <span class="mono">${content.ack.ref}</span></p>` : ''}
               ${content.status ? `
                 <p class="font-medium text-primary">Status: ${content.status.code}</p>
