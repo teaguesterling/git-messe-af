@@ -1,6 +1,6 @@
 ---
 name: mess-mcp
-description: MCP server tools for creating and managing MESS physical-world task requests. Provides mess, mess_status, mess_capabilities, mess_request, mess_answer, and mess_cancel tools plus thread:// and content:// resources.
+description: MCP server tools for creating and managing MESS physical-world task requests. Provides mess, mess_status, mess_capabilities, mess_request, mess_answer, mess_cancel, and mess_get_resource tools.
 ---
 
 # MESS MCP Server
@@ -132,7 +132,7 @@ attachments:
     resource: "content://2026-02-01-001-garage-check/att-002-image-door.jpg"
 ```
 
-**Note:** Images are returned as `content://` resource URIs instead of inline base64 to keep responses lightweight. Use the MCP resource protocol to fetch attachment content when needed.
+**Note:** Images are returned as `content://` resource URIs instead of inline base64 to keep responses lightweight. Use `mess_get_resource` to fetch attachment content when needed.
 
 ## Configuration
 
@@ -275,6 +275,46 @@ ref: "2026-02-01-001"
 reason: "No longer needed"  # optional
 ```
 
+### `mess_get_resource` - Fetch Resource Content
+
+**This is how you retrieve images and attachments.** When `mess_status` returns `content://` URIs, use this tool to fetch the actual content.
+
+**Input:**
+```yaml
+uri: "content://2026-02-01-001/photo.jpg"
+```
+
+**Supported URI schemes:**
+- `content://{ref}/{filename}` - Attachments (images, files)
+- `thread://{ref}` - Full thread data (envelope + messages)
+- `thread://{ref}/envelope` - Thread metadata only
+- `thread://{ref}/latest` - Most recent message
+- `mess://help` - This documentation
+
+**Response for images:**
+```yaml
+uri: "content://2026-02-01-001/photo.jpg"
+mimeType: "image/jpeg"
+encoding: "base64"
+data: "/9j/4AAQSkZJRg..."
+```
+
+**Response for thread data:**
+Returns the thread content as YAML.
+
+**Example workflow:**
+```yaml
+# 1. Check status, see there's an image
+mess_status:
+  ref: "2026-02-01-001"
+# Response includes: resource: "content://2026-02-01-001/photo.jpg"
+
+# 2. Fetch the image
+mess_get_resource:
+  uri: "content://2026-02-01-001/photo.jpg"
+# Response includes base64 image data
+```
+
 ## Request Fields
 
 | Field | Required | Description |
@@ -368,7 +408,7 @@ mess_status:
 
 ## Resources
 
-The MCP server provides `content://` resources for accessing thread attachments.
+The MCP server uses `content://` and `thread://` URIs for attachments and thread data.
 
 ### Fetching Attachments
 
@@ -381,7 +421,14 @@ image:
   size: 245891
 ```
 
-Use the MCP resource protocol to fetch the actual content when needed. This keeps status responses lightweight and avoids blowing up context with large base64 payloads.
+**To fetch the actual image, use `mess_get_resource`:**
+
+```yaml
+mess_get_resource:
+  uri: "content://2026-02-01-001/att-002-image-door.jpg"
+```
+
+This keeps status responses lightweight and avoids blowing up context with large base64 payloads.
 
 ### Resource URI Format
 

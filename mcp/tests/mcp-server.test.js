@@ -1337,29 +1337,25 @@ describe('Help Resource', () => {
 });
 
 describe('Tool Descriptions', () => {
-  it('mess_status description mentions content:// resources', () => {
-    const description = `Check status of MESS requests.
-
-Without ref: Returns all pending/in-progress requests.
-With ref: Returns full details including message history.
-
-**Attachments:** Responses may include \`content://\` URIs for images/files.
-These are MCP resources - fetch them using the MCP resources/read protocol.`;
+  it('mess_status description mentions content:// and mess_get_resource', () => {
+    const description = `**Attachments:** Responses may include \`content://\` URIs for images/files.
+Use \`mess_get_resource\` to fetch the actual content:
+  mess_get_resource: { uri: "content://2026-02-01-001/photo.jpg" }`;
 
     assert.ok(description.includes('content://'));
-    assert.ok(description.includes('MCP resources'));
+    assert.ok(description.includes('mess_get_resource'));
   });
 
-  it('mess_status description mentions thread:// resources', () => {
-    const description = `**Thread data:** Use \`thread://{ref}\` resources for structured thread access.
-Example: \`thread://2026-02-01-001\` or \`thread://2026-02-01-001/latest\``;
+  it('mess_status description mentions thread:// and mess_get_resource', () => {
+    const description = `**Thread data:** Use \`mess_get_resource\` with \`thread://\` URIs:
+  mess_get_resource: { uri: "thread://2026-02-01-001" }`;
 
     assert.ok(description.includes('thread://'));
-    assert.ok(description.includes('/latest'));
+    assert.ok(description.includes('mess_get_resource'));
   });
 
   it('mess_status description mentions mess://help', () => {
-    const description = `For full documentation, read the \`mess://help\` resource.`;
+    const description = `For full documentation: mess_get_resource: { uri: "mess://help" }`;
 
     assert.ok(description.includes('mess://help'));
   });

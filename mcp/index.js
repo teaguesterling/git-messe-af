@@ -142,19 +142,28 @@ async function readResource(uri) {
 ## Tools
 - \`mess_request\` - Create a new physical-world task request
 - \`mess_status\` - Check status of requests (returns content:// URIs for attachments)
+- \`mess_get_resource\` - **Fetch images and attachments** from content:// URIs
 - \`mess_answer\` - Answer executor questions (when status is needs_input)
 - \`mess_cancel\` - Cancel a request
 - \`mess_capabilities\` - List available capabilities
 
-## Resources
-- \`content://{ref}/{filename}\` - Fetch attachment content (images, files)
-- \`thread://{ref}\` - Get full thread data
-- \`thread://{ref}/envelope\` - Get thread metadata only
-- \`thread://{ref}/latest\` - Get most recent message
-
 ## Fetching Attachments
-When \`mess_status\` returns a \`content://\` URI, use MCP resources/read to fetch it.
-The content will be returned as base64-encoded data.
+
+When \`mess_status\` returns a \`content://\` URI for an image, use \`mess_get_resource\` to fetch it:
+
+\`\`\`yaml
+mess_get_resource:
+  uri: "content://2026-02-01-001/photo.jpg"
+\`\`\`
+
+Returns base64-encoded image data with mime type.
+
+## Resource URIs
+- \`content://{ref}/{filename}\` - Attachments (images, files)
+- \`thread://{ref}\` - Full thread data
+- \`thread://{ref}/envelope\` - Thread metadata only
+- \`thread://{ref}/latest\` - Most recent message
+- \`mess://help\` - This documentation
 
 ## Status Codes
 pending → claimed → in_progress → completed/failed/needs_input
@@ -1153,13 +1162,13 @@ Use to:
 - Get responses from completed requests
 
 **Attachments:** Responses may include \`content://\` URIs for images/files.
-These are MCP resources - fetch them using the MCP resources/read protocol.
-Example: \`content://2026-02-01-001/photo.jpg\`
+Use \`mess_get_resource\` to fetch the actual content:
+  mess_get_resource: { uri: "content://2026-02-01-001/photo.jpg" }
 
-**Thread data:** Use \`thread://{ref}\` resources for structured thread access.
-Example: \`thread://2026-02-01-001\` or \`thread://2026-02-01-001/latest\`
+**Thread data:** Use \`mess_get_resource\` with \`thread://\` URIs:
+  mess_get_resource: { uri: "thread://2026-02-01-001" }
 
-For full documentation, read the \`mess://help\` resource.`,
+For full documentation: mess_get_resource: { uri: "mess://help" }`,
       inputSchema: {
         type: 'object',
         properties: {
