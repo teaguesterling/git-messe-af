@@ -13,9 +13,17 @@ The MESS MCP Server provides Claude Desktop with tools to create and manage phys
 
 ### `mess` - Send MESS Protocol Messages
 
-Create new requests or update existing ones.
+Create new requests or update existing ones using free-form YAML.
 
 **Input:** YAML-formatted MESS message
+
+**Why YAML?** The `mess` tool accepts raw MESS protocol messages, allowing you to:
+- Include any valid MESS protocol fields, not just common ones
+- Add custom context, metadata, or instructions
+- Construct complex multi-part messages
+- Use the full expressiveness of the MESS protocol
+
+The examples below show common patterns, but you can include any fields defined in the MESS protocol specification.
 
 #### Creating a Request
 
@@ -89,9 +97,9 @@ ref: null
 ref: "2026-02-01-001"
 ```
 
-**Response:**
+**Response (v2.1.0 format):**
 ```yaml
-ref: "2026-02-01-001"
+ref: "2026-02-01-001-garage-check"
 status: completed
 intent: Check if the garage door is closed
 requestor: claude-desktop
@@ -102,20 +110,29 @@ messages:
     MESS:
       - v: "1.0.0"
       - request:
+          id: garage-check
           intent: Check if the garage door is closed
 
   - from: teague-phone
     received: "2026-02-01T22:05:00Z"
+    re: "2026-02-01-001-garage-check"      # message-level reference
     MESS:
       - status:
-          re: "2026-02-01-001"
           code: completed
       - response:
-          re: "2026-02-01-001"
           content:
-            - image: "data:image/jpeg;base64,/9j/4AAQ..."
+            - image:
+                resource: "content://2026-02-01-001-garage-check/att-002-image-door.jpg"
+                mime: "image/jpeg"
+                size: 245891
             - "All clear - garage door is closed and locked"
+
+attachments:
+  - name: att-002-image-door.jpg
+    resource: "content://2026-02-01-001-garage-check/att-002-image-door.jpg"
 ```
+
+**Note:** Images are returned as `content://` resource URIs instead of inline base64 to keep responses lightweight. Use the MCP resource protocol to fetch attachment content when needed.
 
 ## Configuration
 
@@ -179,9 +196,33 @@ messages:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `intent` | Yes | What you need done (be specific) |
+| `id` | No | Your local identifier for tracking (exchange assigns canonical `ref`) |
 | `context` | No | List of relevant context strings |
 | `priority` | No | `background`, `normal`, `elevated`, `urgent` |
 | `response_hint` | No | Expected response types: `text`, `image`, `video`, `audio` |
+
+### Free-Form Extensions
+
+The MESS protocol is extensible. Beyond the standard fields above, you can include:
+
+```yaml
+- v: 1.0.0
+- request:
+    intent: Check the garden irrigation system
+    context:
+      - Haven't watered in 3 days
+    priority: normal
+    # Standard fields above, custom fields below:
+    location: backyard
+    equipment_needed:
+      - hose access
+      - manual valve knowledge
+    safety_notes:
+      - Watch for wasps near the shed
+    deadline: before 6pm today
+```
+
+Custom fields are preserved in the thread and visible to executors. Use them for domain-specific context that doesn't fit the standard fields.
 
 ## Status Codes
 
@@ -235,15 +276,38 @@ mess_status:
 # Original request got needs_input status
 # Executor asked: "Which light?"
 
-# Send clarification
-- status:
-    re: "2026-02-01-001"
-    code: claimed
-- response:
-    re: "2026-02-01-001"
-    content:
-      - "The living room ceiling light, not the lamp"
+# Send clarification (v2.1.0: answer block, message-level re: handled automatically)
+- answer:
+    id: light-clarification
+    value: "The living room ceiling light, not the lamp"
 ```
+
+## Resources
+
+The MCP server provides `content://` resources for accessing thread attachments.
+
+### Fetching Attachments
+
+When `mess_status` returns a thread, images and files are referenced as resource URIs:
+
+```yaml
+image:
+  resource: "content://2026-02-01-001/att-002-image-door.jpg"
+  mime: "image/jpeg"
+  size: 245891
+```
+
+Use the MCP resource protocol to fetch the actual content when needed. This keeps status responses lightweight and avoids blowing up context with large base64 payloads.
+
+### Resource URI Format
+
+```
+content://{thread-ref}/{attachment-filename}
+```
+
+Examples:
+- `content://2026-02-01-001-garage-check/att-002-image-door.jpg`
+- `content://2026-02-01-003-fridge/att-005-image-contents.jpg`
 
 ## Error Handling
 
