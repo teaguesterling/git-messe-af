@@ -1,6 +1,6 @@
 ---
 name: mess-mcp
-description: MCP server tools for creating and managing MESS physical-world task requests. Provides 'mess', 'mess_status', and 'mess_capabilities' tools for Claude Desktop integration.
+description: MCP server tools for creating and managing MESS physical-world task requests. Provides mess, mess_status, mess_capabilities, mess_request, mess_answer, and mess_cancel tools plus thread:// and content:// resources.
 ---
 
 # MESS MCP Server
@@ -234,6 +234,47 @@ tag: security
 
 Use this to understand what kinds of tasks you can request. Capabilities are defined in `capabilities/*.yaml` in the exchange.
 
+### `mess_request` - Create Request (Simple)
+
+A simpler alternative to the raw `mess` tool for creating requests.
+
+**Input:**
+```yaml
+intent: "Check if the garage door is closed"
+context:
+  - "Getting ready for bed"
+priority: elevated
+response_hints:
+  - image
+```
+
+**Response:**
+```yaml
+ref: "2026-02-01-001"
+status: pending
+message: "Request created"
+```
+
+### `mess_answer` - Answer Question
+
+Respond to an executor's question when status is `needs_input`.
+
+**Input:**
+```yaml
+ref: "2026-02-01-001"
+answer: "The living room ceiling light, not the lamp"
+```
+
+### `mess_cancel` - Cancel Request
+
+Cancel a pending or in-progress request.
+
+**Input:**
+```yaml
+ref: "2026-02-01-001"
+reason: "No longer needed"  # optional
+```
+
 ## Request Fields
 
 | Field | Required | Description |
@@ -351,6 +392,50 @@ content://{thread-ref}/{attachment-filename}
 Examples:
 - `content://2026-02-01-001-garage-check/att-002-image-door.jpg`
 - `content://2026-02-01-003-fridge/att-005-image-contents.jpg`
+
+### Thread Resources
+
+Read thread data with attachments automatically rewritten to `content://` URIs:
+
+```
+thread://{ref}          # Full thread (envelope + messages)
+thread://{ref}/envelope # Just metadata (status, executor, history)
+thread://{ref}/latest   # Most recent message only
+```
+
+**Example - Read full thread:**
+```yaml
+# Request: thread://2026-02-01-001
+
+# Response:
+envelope:
+  ref: "2026-02-01-001"
+  status: completed
+  intent: Check the garage door
+messages:
+  - from: claude-desktop
+    MESS:
+      - request:
+          intent: Check the garage door
+  - from: teague-phone
+    MESS:
+      - response:
+          content:
+            - image:
+                resource: "content://2026-02-01-001/att-001-door.jpg"
+            - "Door is closed"
+```
+
+**Example - Read just envelope:**
+```yaml
+# Request: thread://2026-02-01-001/envelope
+
+# Response:
+ref: "2026-02-01-001"
+status: completed
+executor: teague-phone
+updated: "2026-02-01T22:05:00Z"
+```
 
 ## Error Handling
 

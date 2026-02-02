@@ -103,10 +103,18 @@ function getRegisteredResources() {
 
 /**
  * Read a resource by URI
- * @param {string} uri - Resource URI (content://ref/filename)
+ * @param {string} uri - Resource URI (content://ref/filename or thread://ref[/part])
  * @returns {Object} Resource content
  */
 async function readResource(uri) {
+  // Handle thread:// URIs
+  const threadMatch = uri.match(/^thread:\/\/([^/]+)(\/(.+))?$/);
+  if (threadMatch) {
+    const [, ref, , part] = threadMatch;
+    return await readThreadResource(ref, part);
+  }
+
+  // Handle content:// URIs (attachments)
   const match = uri.match(/^content:\/\/([^/]+)\/(.+)$/);
   if (!match) {
     throw new Error(`Invalid resource URI: ${uri}`);
@@ -157,6 +165,53 @@ async function readResource(uri) {
   }
 
   throw new Error(`Resource not found: ${uri}`);
+}
+
+/**
+ * Read a thread resource
+ * @param {string} ref - Thread ref
+ * @param {string} part - Optional part: 'envelope', 'latest', or undefined for full thread
+ * @returns {Object} Resource content with content:// URIs for attachments
+ */
+async function readThreadResource(ref, part) {
+  const thread = await findThread(ref);
+  if (!thread) {
+    throw new Error(`Thread not found: ${ref}`);
+  }
+
+  // Rewrite inline base64 to content:// URIs
+  const rewritten = rewriteToResourceURIs(thread, {
+    cacheAttachment: (att) => {
+      // Register attachments for content:// access
+      if (!resourceRegistry.has(ref)) {
+        resourceRegistry.set(ref, new Map());
+      }
+      const filename = att.name || `attachment-${Date.now()}`;
+      resourceRegistry.get(ref).set(filename, {
+        mime: att.mime,
+        content: att.content
+      });
+      return `content://${ref}/${filename}`;
+    }
+  });
+
+  let result;
+  if (part === 'envelope') {
+    result = rewritten.envelope;
+  } else if (part === 'latest') {
+    result = rewritten.messages[rewritten.messages.length - 1] || null;
+  } else {
+    result = {
+      envelope: rewritten.envelope,
+      messages: rewritten.messages
+    };
+  }
+
+  return {
+    uri: `thread://${ref}${part ? '/' + part : ''}`,
+    mimeType: 'application/yaml',
+    text: YAML.stringify(result)
+  };
 }
 
 /**
@@ -1061,6 +1116,63 @@ Use this to understand what kinds of physical-world tasks can be requested.`,
           tag: { type: 'string', description: 'Filter by tag (e.g., "security", "attachments")' }
         }
       }
+    },
+    {
+      name: 'mess_request',
+      description: `Create a new physical-world task request.
+
+This is a simpler alternative to the raw 'mess' tool for creating requests.
+Returns the assigned ref for tracking.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          intent: { type: 'string', description: 'What you need done (be specific)' },
+          context: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Relevant context (e.g., "Getting ready for bed")'
+          },
+          priority: {
+            type: 'string',
+            enum: ['background', 'normal', 'elevated', 'urgent'],
+            description: 'Request priority (default: normal)'
+          },
+          response_hints: {
+            type: 'array',
+            items: { type: 'string', enum: ['text', 'image', 'video', 'audio'] },
+            description: 'Expected response types'
+          }
+        },
+        required: ['intent']
+      }
+    },
+    {
+      name: 'mess_answer',
+      description: `Answer an executor's question (when status is needs_input).
+
+Use this to provide clarification when an executor asks for more information.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Thread ref (e.g., "2026-01-31-001")' },
+          answer: { type: 'string', description: 'Your answer to the executor\'s question' }
+        },
+        required: ['ref', 'answer']
+      }
+    },
+    {
+      name: 'mess_cancel',
+      description: `Cancel a pending or in-progress request.
+
+Use this when you no longer need the task completed.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Thread ref to cancel' },
+          reason: { type: 'string', description: 'Why you\'re cancelling (optional)' }
+        },
+        required: ['ref']
+      }
     }
   ]
 }));
@@ -1118,6 +1230,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = capabilities.filter(c => c.tags?.includes(args.tag));
       }
 
+      return { content: [{ type: 'text', text: YAML.stringify(result) }] };
+    }
+
+    if (name === 'mess_request') {
+      const req = {
+        intent: args.intent,
+        context: args.context || [],
+        priority: args.priority || 'normal',
+        response_hint: args.response_hints || []
+      };
+      const result = await createRequest(AGENT_ID, req);
+      return { content: [{ type: 'text', text: YAML.stringify(result) }] };
+    }
+
+    if (name === 'mess_answer') {
+      const mess = [{
+        answer: {
+          re: args.ref,
+          value: args.answer
+        }
+      }];
+      const result = await updateThread(args.ref, AGENT_ID, mess);
+      return { content: [{ type: 'text', text: YAML.stringify(result) }] };
+    }
+
+    if (name === 'mess_cancel') {
+      const mess = [{
+        cancel: {
+          re: args.ref,
+          ...(args.reason && { reason: args.reason })
+        }
+      }];
+      const result = await updateThread(args.ref, AGENT_ID, mess, 'cancelled');
       return { content: [{ type: 'text', text: YAML.stringify(result) }] };
     }
 

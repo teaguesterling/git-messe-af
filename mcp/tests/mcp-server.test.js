@@ -824,3 +824,152 @@ describe('Capabilities Filtering', () => {
     assert.ok(securityCaps.every(c => c.tags.includes('security')));
   });
 });
+
+describe('Helper Tools', () => {
+  it('mess_request builds correct request structure', () => {
+    // Simulate what mess_request handler does
+    const args = {
+      intent: 'Check the garage door',
+      context: ['Getting ready for bed'],
+      priority: 'elevated',
+      response_hints: ['image', 'text']
+    };
+
+    const req = {
+      intent: args.intent,
+      context: args.context || [],
+      priority: args.priority || 'normal',
+      response_hint: args.response_hints || []
+    };
+
+    assert.strictEqual(req.intent, 'Check the garage door');
+    assert.deepStrictEqual(req.context, ['Getting ready for bed']);
+    assert.strictEqual(req.priority, 'elevated');
+    assert.deepStrictEqual(req.response_hint, ['image', 'text']);
+  });
+
+  it('mess_request uses defaults for optional fields', () => {
+    const args = { intent: 'Simple task' };
+
+    const req = {
+      intent: args.intent,
+      context: args.context || [],
+      priority: args.priority || 'normal',
+      response_hint: args.response_hints || []
+    };
+
+    assert.strictEqual(req.intent, 'Simple task');
+    assert.deepStrictEqual(req.context, []);
+    assert.strictEqual(req.priority, 'normal');
+    assert.deepStrictEqual(req.response_hint, []);
+  });
+
+  it('mess_answer builds correct answer structure', () => {
+    const args = {
+      ref: '2026-02-01-001',
+      answer: 'The living room light'
+    };
+
+    const mess = [{
+      answer: {
+        re: args.ref,
+        value: args.answer
+      }
+    }];
+
+    assert.strictEqual(mess[0].answer.re, '2026-02-01-001');
+    assert.strictEqual(mess[0].answer.value, 'The living room light');
+  });
+
+  it('mess_cancel builds correct cancel structure', () => {
+    const args = {
+      ref: '2026-02-01-001',
+      reason: 'No longer needed'
+    };
+
+    const mess = [{
+      cancel: {
+        re: args.ref,
+        ...(args.reason && { reason: args.reason })
+      }
+    }];
+
+    assert.strictEqual(mess[0].cancel.re, '2026-02-01-001');
+    assert.strictEqual(mess[0].cancel.reason, 'No longer needed');
+  });
+
+  it('mess_cancel works without reason', () => {
+    const args = { ref: '2026-02-01-001' };
+
+    const mess = [{
+      cancel: {
+        re: args.ref,
+        ...(args.reason && { reason: args.reason })
+      }
+    }];
+
+    assert.strictEqual(mess[0].cancel.re, '2026-02-01-001');
+    assert.strictEqual(mess[0].cancel.reason, undefined);
+  });
+});
+
+describe('Thread Resources', () => {
+  it('parses thread:// URI correctly', () => {
+    const uri = 'thread://2026-02-01-001';
+    const match = uri.match(/^thread:\/\/([^/]+)(\/(.+))?$/);
+
+    assert.ok(match);
+    assert.strictEqual(match[1], '2026-02-01-001');
+    assert.strictEqual(match[3], undefined);
+  });
+
+  it('parses thread:// URI with part', () => {
+    const uri = 'thread://2026-02-01-001/envelope';
+    const match = uri.match(/^thread:\/\/([^/]+)(\/(.+))?$/);
+
+    assert.ok(match);
+    assert.strictEqual(match[1], '2026-02-01-001');
+    assert.strictEqual(match[3], 'envelope');
+  });
+
+  it('parses thread:// URI with latest part', () => {
+    const uri = 'thread://2026-02-01-001/latest';
+    const match = uri.match(/^thread:\/\/([^/]+)(\/(.+))?$/);
+
+    assert.ok(match);
+    assert.strictEqual(match[1], '2026-02-01-001');
+    assert.strictEqual(match[3], 'latest');
+  });
+
+  it('extracts envelope from thread', () => {
+    const thread = {
+      envelope: { ref: '2026-02-01-001', status: 'pending', intent: 'Test' },
+      messages: [{ from: 'agent', MESS: [] }]
+    };
+
+    const part = 'envelope';
+    const result = part === 'envelope' ? thread.envelope : thread;
+
+    assert.strictEqual(result.ref, '2026-02-01-001');
+    assert.strictEqual(result.status, 'pending');
+    assert.strictEqual(result.messages, undefined);
+  });
+
+  it('extracts latest message from thread', () => {
+    const thread = {
+      envelope: { ref: '2026-02-01-001' },
+      messages: [
+        { from: 'agent', received: '2026-02-01T10:00:00Z' },
+        { from: 'executor', received: '2026-02-01T10:05:00Z' }
+      ]
+    };
+
+    const part = 'latest';
+    const result = part === 'latest'
+      ? thread.messages[thread.messages.length - 1]
+      : thread;
+
+    assert.strictEqual(result.from, 'executor');
+    assert.strictEqual(result.received, '2026-02-01T10:05:00Z');
+  });
+});

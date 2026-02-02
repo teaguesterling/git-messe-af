@@ -7,7 +7,8 @@ An MCP (Model Context Protocol) server that enables AI agents like Claude to dis
 - **GitHub sync**: Tasks sync to/from your GitHub repository
 - **Local mode**: Store tasks locally without GitHub
 - **Hybrid mode**: Local storage with GitHub backup
-- Three tools: `mess`, `mess_status`, and `mess_capabilities`
+- Six tools: `mess`, `mess_status`, `mess_capabilities`, `mess_request`, `mess_answer`, `mess_cancel`
+- Resources: `content://` for attachments, `thread://` for thread data
 
 ## Installation
 
@@ -229,6 +230,60 @@ List available physical-world capabilities for this exchange.
 ```
 
 Capabilities are defined in `capabilities/*.yaml` files. See [docs/capabilities.md](../docs/capabilities.md) for the format.
+
+### `mess_request`
+
+Create a new physical-world task request (simpler than raw `mess` tool).
+
+**Parameters:**
+- `intent` (required): What you need done
+- `context`: Array of relevant context strings
+- `priority`: `background`, `normal`, `elevated`, or `urgent`
+- `response_hints`: Expected response types (`text`, `image`, `video`, `audio`)
+
+**Example:**
+```json
+{
+  "intent": "Check if the garage door is closed",
+  "context": ["Getting ready for bed"],
+  "priority": "elevated",
+  "response_hints": ["image"]
+}
+```
+
+### `mess_answer`
+
+Answer an executor's question (when status is `needs_input`).
+
+**Parameters:**
+- `ref` (required): Thread ref
+- `answer` (required): Your answer
+
+### `mess_cancel`
+
+Cancel a pending or in-progress request.
+
+**Parameters:**
+- `ref` (required): Thread ref to cancel
+- `reason`: Why you're cancelling (optional)
+
+## Resources
+
+### `content://` - Attachments
+
+Fetch attachment content from threads:
+```
+content://{thread-ref}/{filename}
+```
+
+### `thread://` - Thread Data
+
+Read thread data with attachments rewritten to `content://` URIs:
+```
+thread://{ref}          # Full thread (envelope + messages)
+thread://{ref}/envelope # Just metadata (status, executor, history)
+thread://{ref}/latest   # Most recent message only
+```
 
 ## Troubleshooting
 
