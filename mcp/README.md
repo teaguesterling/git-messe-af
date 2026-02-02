@@ -7,7 +7,7 @@ An MCP (Model Context Protocol) server that enables AI agents like Claude to dis
 - **GitHub sync**: Tasks sync to/from your GitHub repository
 - **Local mode**: Store tasks locally without GitHub
 - **Hybrid mode**: Local storage with GitHub backup
-- Seven tools: `mess`, `mess_status`, `mess_capabilities`, `mess_request`, `mess_answer`, `mess_cancel`, `mess_fetch`
+- Eight tools: `mess`, `mess_status`, `mess_capabilities`, `mess_request`, `mess_answer`, `mess_cancel`, `mess_fetch`, `mess_wait`
 - Resources: `content://` for attachments, `thread://` for thread data
 
 ## Installation
@@ -289,6 +289,31 @@ Fetch content from MESS resource URIs. Use this to retrieve images, files, or th
 ```
 
 For images, returns base64-encoded data with mime type.
+
+### `mess_wait`
+
+Wait for changes to threads instead of polling `mess_status` repeatedly.
+
+**Parameters:**
+- `ref`: Optional thread ref to watch specifically
+- `timeout`: Max seconds to wait (default: 60, max: 300)
+
+**Example:**
+```json
+{ "ref": "2026-02-01-001", "timeout": 120 }
+```
+
+**Returns:**
+```yaml
+updated:
+  - ref: "2026-02-01-001"
+    status: claimed
+    hasUpdates: true
+waited: 5
+timedOut: false
+```
+
+Returns immediately if threads already have updates since last `mess_status` call. Returns empty `updated` array if timeout expires with no changes.
 
 ## Resources
 

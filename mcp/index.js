@@ -66,6 +66,10 @@ const SYNC_INTERVAL = parseInt(process.env.MESS_SYNC_INTERVAL || '30000', 10); /
 // Thread state tracking for change detection
 const threadStateCache = new Map(); // ref -> { status, updated, executor }
 
+// Track last status check time for "new since last check" feature
+let lastStatusCheckTime = null;
+const threadLastSeenState = new Map(); // ref -> { status, updated } at last check
+
 /**
  * Cache an attachment and register it as a resource
  * @param {string} ref - Thread reference
@@ -1103,7 +1107,27 @@ async function getStatus(ref) {
     }
   }
 
-  return results.sort((a, b) => new Date(b.updated) - new Date(a.updated));
+  // Add "hasUpdates" flag based on changes since last check
+  const now = new Date().toISOString();
+  const enrichedResults = results.map(thread => {
+    const lastSeen = threadLastSeenState.get(thread.ref);
+    const hasUpdates = lastSeen
+      ? (thread.status !== lastSeen.status || thread.updated !== lastSeen.updated)
+      : true; // New thread = has updates
+
+    return { ...thread, hasUpdates };
+  });
+
+  // Update last seen state for all threads
+  for (const thread of enrichedResults) {
+    threadLastSeenState.set(thread.ref, {
+      status: thread.status,
+      updated: thread.updated
+    });
+  }
+  lastStatusCheckTime = now;
+
+  return enrichedResults.sort((a, b) => new Date(b.updated) - new Date(a.updated));
 }
 
 // ============ MCP Server ============
@@ -1276,6 +1300,35 @@ For thread/text data, returns the content directly.`,
         },
         required: ['uri']
       }
+    },
+    {
+      name: 'mess_wait',
+      description: `Wait for changes to MESS threads.
+
+This tool blocks until one of your threads changes (claimed, completed, needs_input, etc.) or the timeout expires. Use this instead of repeatedly polling mess_status.
+
+Returns immediately if there are already threads with updates since your last mess_status call.
+
+**When to use:**
+- After creating a request, call mess_wait to be notified when it's claimed/completed
+- Use timeout for long-running waits (default: 60 seconds, max: 300 seconds)
+
+**Returns:**
+- List of threads that changed, with \`hasUpdates: true\`
+- Empty list if timeout expired with no changes`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ref: {
+            type: 'string',
+            description: 'Optional: wait for a specific thread only'
+          },
+          timeout: {
+            type: 'number',
+            description: 'Max seconds to wait (default: 60, max: 300)'
+          }
+        }
+      }
     }
   ]
 }));
@@ -1404,6 +1457,73 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }]
         };
       }
+    }
+
+    if (name === 'mess_wait') {
+      const timeout = Math.min(Math.max(args.timeout || 60, 1), 300); // 1-300 seconds
+      const targetRef = args.ref;
+      const pollInterval = 2000; // 2 seconds between checks
+      const startTime = Date.now();
+      const endTime = startTime + (timeout * 1000);
+
+      // Helper to check for updates
+      const checkUpdates = async () => {
+        const threads = await getStatus(undefined); // List all threads
+
+        // Filter to target ref if specified
+        const relevantThreads = targetRef
+          ? threads.filter(t => t.ref === targetRef)
+          : threads;
+
+        // Return threads with updates
+        return relevantThreads.filter(t => t.hasUpdates);
+      };
+
+      // First check - return immediately if there are already updates
+      let updated = await checkUpdates();
+      if (updated.length > 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: YAML.stringify({
+              updated: updated,
+              waited: 0,
+              timedOut: false
+            })
+          }]
+        };
+      }
+
+      // Poll until timeout
+      while (Date.now() < endTime) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+        updated = await checkUpdates();
+        if (updated.length > 0) {
+          return {
+            content: [{
+              type: 'text',
+              text: YAML.stringify({
+                updated: updated,
+                waited: Math.round((Date.now() - startTime) / 1000),
+                timedOut: false
+              })
+            }]
+          };
+        }
+      }
+
+      // Timeout - return empty
+      return {
+        content: [{
+          type: 'text',
+          text: YAML.stringify({
+            updated: [],
+            waited: timeout,
+            timedOut: true
+          })
+        }]
+      };
     }
 
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };

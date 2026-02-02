@@ -82,6 +82,7 @@ ref: null
   executor: null
   priority: normal
   created: "2026-02-01T22:00:00Z"
+  hasUpdates: true    # changed since last mess_status call
 
 - ref: "2026-02-01-002"
   status: claimed
@@ -89,7 +90,10 @@ ref: null
   requestor: claude-desktop
   executor: teague-phone
   priority: normal
+  hasUpdates: false   # no changes since last check
 ```
+
+**Note:** The `hasUpdates` flag indicates whether the thread changed since your last `mess_status` call. New threads always have `hasUpdates: true`. Use `mess_wait` instead of polling if you want to wait for changes efficiently.
 
 #### Get Specific Thread
 
@@ -273,6 +277,45 @@ Cancel a pending or in-progress request.
 ```yaml
 ref: "2026-02-01-001"
 reason: "No longer needed"  # optional
+```
+
+### `mess_wait` - Wait for Changes
+
+Wait for changes to threads instead of polling `mess_status` repeatedly.
+
+**Input:**
+```yaml
+ref: "2026-02-01-001"  # optional: wait for specific thread
+timeout: 60             # optional: max seconds (default: 60, max: 300)
+```
+
+**Response:**
+```yaml
+updated:
+  - ref: "2026-02-01-001"
+    status: claimed
+    hasUpdates: true
+waited: 5
+timedOut: false
+```
+
+**When to use:**
+- After creating a request, call `mess_wait` to be notified when claimed/completed
+- Returns immediately if threads already have updates since your last `mess_status` call
+- Use for efficient long-running waits instead of polling
+
+**Example workflow:**
+```yaml
+# 1. Create a request
+mess_request:
+  intent: "Check if the garage door is closed"
+
+# 2. Wait for it to be completed (up to 5 minutes)
+mess_wait:
+  ref: "2026-02-01-001"
+  timeout: 300
+
+# 3. Response returns when status changes or timeout
 ```
 
 ### `mess_fetch` - Fetch Resource Content

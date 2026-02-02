@@ -1656,3 +1656,179 @@ describe('mess_fetch Content Type Handling', () => {
   });
 
 });
+
+// ============ hasUpdates Flag ============
+describe('hasUpdates Flag', () => {
+  it('new threads have hasUpdates=true on first check', () => {
+    // Simulate threadLastSeenState tracking
+    const threadLastSeenState = new Map();
+
+    const threads = [
+      { ref: '2026-02-01-001', status: 'pending', updated: '2026-02-01T10:00:00Z' },
+      { ref: '2026-02-01-002', status: 'claimed', updated: '2026-02-01T10:05:00Z' }
+    ];
+
+    // First check - no previous state
+    const enriched = threads.map(thread => {
+      const lastSeen = threadLastSeenState.get(thread.ref);
+      const hasUpdates = lastSeen
+        ? (thread.status !== lastSeen.status || thread.updated !== lastSeen.updated)
+        : true; // New thread = has updates
+      return { ...thread, hasUpdates };
+    });
+
+    assert.strictEqual(enriched[0].hasUpdates, true);
+    assert.strictEqual(enriched[1].hasUpdates, true);
+  });
+
+  it('unchanged threads have hasUpdates=false on second check', () => {
+    const threadLastSeenState = new Map();
+
+    const threads = [
+      { ref: '2026-02-01-001', status: 'pending', updated: '2026-02-01T10:00:00Z' }
+    ];
+
+    // First check - record state
+    for (const thread of threads) {
+      threadLastSeenState.set(thread.ref, {
+        status: thread.status,
+        updated: thread.updated
+      });
+    }
+
+    // Second check - same state
+    const enriched = threads.map(thread => {
+      const lastSeen = threadLastSeenState.get(thread.ref);
+      const hasUpdates = lastSeen
+        ? (thread.status !== lastSeen.status || thread.updated !== lastSeen.updated)
+        : true;
+      return { ...thread, hasUpdates };
+    });
+
+    assert.strictEqual(enriched[0].hasUpdates, false);
+  });
+
+  it('status change sets hasUpdates=true', () => {
+    const threadLastSeenState = new Map();
+
+    // First check
+    threadLastSeenState.set('2026-02-01-001', {
+      status: 'pending',
+      updated: '2026-02-01T10:00:00Z'
+    });
+
+    // Thread now has different status
+    const thread = { ref: '2026-02-01-001', status: 'claimed', updated: '2026-02-01T10:05:00Z' };
+    const lastSeen = threadLastSeenState.get(thread.ref);
+    const hasUpdates = lastSeen
+      ? (thread.status !== lastSeen.status || thread.updated !== lastSeen.updated)
+      : true;
+
+    assert.strictEqual(hasUpdates, true);
+  });
+
+  it('updated timestamp change sets hasUpdates=true', () => {
+    const threadLastSeenState = new Map();
+
+    // First check
+    threadLastSeenState.set('2026-02-01-001', {
+      status: 'pending',
+      updated: '2026-02-01T10:00:00Z'
+    });
+
+    // Thread has same status but different updated time
+    const thread = { ref: '2026-02-01-001', status: 'pending', updated: '2026-02-01T10:01:00Z' };
+    const lastSeen = threadLastSeenState.get(thread.ref);
+    const hasUpdates = lastSeen
+      ? (thread.status !== lastSeen.status || thread.updated !== lastSeen.updated)
+      : true;
+
+    assert.strictEqual(hasUpdates, true);
+  });
+});
+
+// ============ mess_wait Tool ============
+describe('mess_wait Tool', () => {
+  it('timeout is clamped to valid range', () => {
+    // Test the clamping logic (0 is treated as falsy, uses default)
+    const clampTimeout = (t) => Math.min(Math.max(t || 60, 1), 300);
+
+    assert.strictEqual(clampTimeout(undefined), 60); // default
+    assert.strictEqual(clampTimeout(30), 30);        // valid
+    assert.strictEqual(clampTimeout(0), 60);         // falsy, uses default
+    assert.strictEqual(clampTimeout(-5), 1);         // negative clamped to 1
+    assert.strictEqual(clampTimeout(500), 300);      // max clamped
+    assert.strictEqual(clampTimeout(300), 300);      // exactly max
+  });
+
+  it('returns immediately when updates exist', () => {
+    // Simulate the check logic
+    const threads = [
+      { ref: '2026-02-01-001', status: 'claimed', hasUpdates: true },
+      { ref: '2026-02-01-002', status: 'pending', hasUpdates: false }
+    ];
+
+    const targetRef = undefined; // all threads
+    const relevantThreads = targetRef
+      ? threads.filter(t => t.ref === targetRef)
+      : threads;
+    const updated = relevantThreads.filter(t => t.hasUpdates);
+
+    assert.strictEqual(updated.length, 1);
+    assert.strictEqual(updated[0].ref, '2026-02-01-001');
+  });
+
+  it('filters to specific ref when provided', () => {
+    const threads = [
+      { ref: '2026-02-01-001', status: 'claimed', hasUpdates: true },
+      { ref: '2026-02-01-002', status: 'completed', hasUpdates: true }
+    ];
+
+    const targetRef = '2026-02-01-002';
+    const relevantThreads = targetRef
+      ? threads.filter(t => t.ref === targetRef)
+      : threads;
+    const updated = relevantThreads.filter(t => t.hasUpdates);
+
+    assert.strictEqual(updated.length, 1);
+    assert.strictEqual(updated[0].ref, '2026-02-01-002');
+  });
+
+  it('returns empty when no updates and targeting nonexistent ref', () => {
+    const threads = [
+      { ref: '2026-02-01-001', status: 'pending', hasUpdates: false }
+    ];
+
+    const targetRef = '2026-02-01-999';
+    const relevantThreads = targetRef
+      ? threads.filter(t => t.ref === targetRef)
+      : threads;
+    const updated = relevantThreads.filter(t => t.hasUpdates);
+
+    assert.strictEqual(updated.length, 0);
+  });
+
+  it('response structure includes waited and timedOut', () => {
+    // Test expected response structure
+    const response = {
+      updated: [{ ref: '2026-02-01-001', status: 'claimed', hasUpdates: true }],
+      waited: 5,
+      timedOut: false
+    };
+
+    assert.ok(Array.isArray(response.updated));
+    assert.strictEqual(typeof response.waited, 'number');
+    assert.strictEqual(typeof response.timedOut, 'boolean');
+  });
+
+  it('timeout response has empty updated array', () => {
+    const response = {
+      updated: [],
+      waited: 60,
+      timedOut: true
+    };
+
+    assert.strictEqual(response.updated.length, 0);
+    assert.strictEqual(response.timedOut, true);
+  });
+});

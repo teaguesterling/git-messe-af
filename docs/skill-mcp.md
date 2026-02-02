@@ -122,6 +122,28 @@ ref: "2026-02-01-001"
 reason: "No longer needed"
 ```
 
+### `mess_wait` - Wait for Changes
+
+Wait for changes to threads instead of polling `mess_status` repeatedly.
+
+**Input:**
+```yaml
+ref: "2026-02-01-001"  # optional
+timeout: 60             # optional (default: 60, max: 300)
+```
+
+**Response:**
+```yaml
+updated:
+  - ref: "2026-02-01-001"
+    status: claimed
+    hasUpdates: true
+waited: 5
+timedOut: false
+```
+
+Returns immediately if threads have updates since last `mess_status` call. Returns empty `updated` array if timeout expires.
+
 ### `mess_fetch` - Fetch Resource Content
 
 Fetch images, files, or thread data from MESS resource URIs.
