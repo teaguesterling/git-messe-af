@@ -8,7 +8,7 @@ The MESS MCP Server provides Claude Desktop with tools to create and manage phys
 
 ### `mess` - Send MESS Protocol Messages
 
-Create new requests or update existing ones.
+Create new requests or update existing ones using raw YAML. For simpler operations, prefer the helper tools below.
 
 **Input:** YAML-formatted MESS message
 
@@ -20,65 +20,32 @@ Create new requests or update existing ones.
     intent: Check if the garage door is closed
     context:
       - Getting ready for bed
-      - Want to make sure house is secure
     priority: normal
     response_hint:
       - image
-      - text
 ```
 
 **Response:**
 ```yaml
 ref: "2026-02-01-001"
 status: pending
-message: "Request created: 2026-02-01-001"
+message: "Request created"
 ```
 
 #### Updating a Request
 
-Send a status update:
 ```yaml
 - status:
     re: "2026-02-01-001"
     code: claimed
 ```
 
-Cancel a request:
-```yaml
-- cancel:
-    re: "2026-02-01-001"
-    reason: "No longer needed"
-```
-
 ### `mess_status` - Check Request Status
 
 Query pending requests or get details on a specific thread.
 
-#### List All Active Requests
-
-```yaml
-ref: null
-```
-
-**Response:**
-```yaml
-- ref: "2026-02-01-001"
-  status: pending
-  intent: Check if the garage door is closed
-  requestor: claude-desktop
-  executor: null
-  priority: normal
-  created: "2026-02-01T22:00:00Z"
-
-- ref: "2026-02-01-002"
-  status: claimed
-  intent: What's in the fridge?
-  requestor: claude-desktop
-  executor: teague-phone
-  priority: normal
-```
-
-#### Get Specific Thread
+**Without ref:** Lists all pending/in-progress requests
+**With ref:** Returns full thread with messages
 
 ```yaml
 ref: "2026-02-01-001"
@@ -89,27 +56,88 @@ ref: "2026-02-01-001"
 ref: "2026-02-01-001"
 status: completed
 intent: Check if the garage door is closed
-requestor: claude-desktop
-executor: teague-phone
 messages:
   - from: claude-desktop
-    received: "2026-02-01T22:00:00Z"
     MESS:
-      - v: "1.0.0"
       - request:
           intent: Check if the garage door is closed
-
   - from: teague-phone
-    received: "2026-02-01T22:05:00Z"
     MESS:
-      - status:
-          re: "2026-02-01-001"
-          code: completed
       - response:
-          re: "2026-02-01-001"
           content:
-            - image: "data:image/jpeg;base64,/9j/4AAQ..."
-            - "All clear - garage door is closed and locked"
+            - image:
+                resource: "content://2026-02-01-001/att-001-door.jpg"
+            - "Door is closed and locked"
+```
+
+**Note:** Images are returned as `content://` resource URIs instead of inline base64.
+
+### `mess_capabilities` - Discover Capabilities
+
+List physical-world capabilities available in this exchange.
+
+**Input:** Optional `tag` filter
+
+**Response:**
+```yaml
+- id: camera
+  description: Take and attach photos
+  tags: [attachments]
+- id: check-door
+  description: Check if doors are locked
+  tags: [security, physical-access]
+```
+
+### `mess_request` - Create Request (Simple)
+
+Simpler alternative to raw `mess` for creating requests.
+
+**Input:**
+```yaml
+intent: "Check if the garage door is closed"
+context:
+  - "Getting ready for bed"
+priority: elevated
+response_hints:
+  - image
+```
+
+### `mess_answer` - Answer Question
+
+Respond to executor's question when status is `needs_input`.
+
+**Input:**
+```yaml
+ref: "2026-02-01-001"
+answer: "The living room ceiling light"
+```
+
+### `mess_cancel` - Cancel Request
+
+Cancel a pending or in-progress request.
+
+**Input:**
+```yaml
+ref: "2026-02-01-001"
+reason: "No longer needed"
+```
+
+## Resources
+
+### `content://` - Attachments
+
+Fetch attachment content from threads:
+```
+content://{thread-ref}/{filename}
+```
+
+### `thread://` - Thread Data
+
+Read thread data with attachments as `content://` URIs:
+```
+thread://{ref}          # Full thread
+thread://{ref}/envelope # Just metadata
+thread://{ref}/latest   # Most recent message
 ```
 
 ## Configuration
@@ -150,25 +178,6 @@ messages:
 }
 ```
 
-### Hybrid Mode (Local + GitHub Sync)
-
-```json
-{
-  "mcpServers": {
-    "mess": {
-      "command": "node",
-      "args": ["/path/to/mcp/index.js"],
-      "env": {
-        "MESS_DIR": "~/.mess",
-        "MESS_GITHUB_REPO": "username/mess-exchange",
-        "MESS_GITHUB_TOKEN": "github_pat_xxxxx",
-        "MESS_AGENT_ID": "claude-desktop"
-      }
-    }
-  }
-}
-```
-
 ## Request Fields
 
 | Field | Required | Description |
@@ -190,83 +199,3 @@ messages:
 | `failed` | Could not complete |
 | `declined` | Executor declined the request |
 | `cancelled` | Request was cancelled |
-
-## Common Patterns
-
-### Create and Wait
-
-```python
-# 1. Create request
-mess:
-  - v: 1.0.0
-  - request:
-      intent: Is anyone home?
-
-# 2. Periodically check status
-mess_status:
-  ref: "2026-02-01-001"
-
-# 3. When completed, read the response
-```
-
-### Urgent Request
-
-```yaml
-- v: 1.0.0
-- request:
-    intent: Did I leave the stove on?
-    context:
-      - Just left the house
-      - Can't remember if I turned it off
-    priority: urgent
-    response_hint:
-      - image
-      - text
-```
-
-### Follow-up After needs_input
-
-```yaml
-# Original request got needs_input status
-# Executor asked: "Which light?"
-
-# Send clarification
-- status:
-    re: "2026-02-01-001"
-    code: claimed
-- response:
-    re: "2026-02-01-001"
-    content:
-      - "The living room ceiling light, not the lamp"
-```
-
-## Error Handling
-
-**Thread not found:**
-```yaml
-error: "Thread 2026-02-01-999 not found"
-```
-
-**Missing required field:**
-```yaml
-error: "Missing re: field"
-```
-
-**GitHub API error:**
-```yaml
-error: "GitHub API error: 401"
-```
-
-## File Locations
-
-### macOS
-- Config: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Local MESS dir: `~/.mess/`
-
-### Linux
-- Config: `~/.config/claude/claude_desktop_config.json`
-- Local MESS dir: `~/.mess/`
-
-### Windows
-- Config: `%APPDATA%\Claude\claude_desktop_config.json`
-- Local MESS dir: `%USERPROFILE%\.mess\`

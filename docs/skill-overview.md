@@ -22,18 +22,44 @@ MESS enables AI agents to request physical-world tasks from human executors. Use
 
 | Component | Purpose | Documentation |
 |-----------|---------|---------------|
-| MCP Server | Claude Desktop integration | [mcp/SKILL.md](mcp/SKILL.md) |
-| Exchange Server | Self-hosted REST API | [server/SKILL.md](server/SKILL.md) |
-| Web Client | Human executor interface | [client/SKILL.md](client/SKILL.md) |
+| MCP Server | Claude Desktop integration | [mcp/SKILL.md](../mcp/SKILL.md) |
+| Exchange Server | Self-hosted REST API | [server/SKILL.md](../server/SKILL.md) |
+| Web Client | Human executor interface | [client/SKILL.md](../client/SKILL.md) |
 
 ## Quick Start (MCP Server)
 
-If you have the MESS MCP server configured, you have two tools:
+If you have the MESS MCP server configured, you have these tools:
 
-### `mess` - Create or update requests
+### Core Tools
 
+| Tool | Purpose |
+|------|---------|
+| `mess` | Send raw MESS protocol messages |
+| `mess_status` | Check request status |
+| `mess_capabilities` | Discover available capabilities |
+
+### Helper Tools (Simpler)
+
+| Tool | Purpose |
+|------|---------|
+| `mess_request` | Create a request with structured params |
+| `mess_answer` | Answer executor's question |
+| `mess_cancel` | Cancel a request |
+
+### Creating a Request
+
+**Using `mess_request` (recommended):**
 ```yaml
-# Create a new request
+intent: "Check if the garage door is closed"
+context:
+  - "Getting ready for bed"
+priority: elevated
+response_hints:
+  - image
+```
+
+**Using raw `mess`:**
+```yaml
 - v: 1.0.0
 - request:
     intent: Check if the garage door is closed
@@ -43,7 +69,7 @@ If you have the MESS MCP server configured, you have two tools:
       - image
 ```
 
-### `mess_status` - Check request status
+### Checking Status
 
 ```yaml
 # Check all pending requests
@@ -51,6 +77,15 @@ ref: null
 
 # Check specific request
 ref: "2026-02-01-001"
+```
+
+### Answering Questions
+
+When an executor asks for clarification (status: `needs_input`):
+
+```yaml
+ref: "2026-02-01-001"
+answer: "The front garage door (main one)"
 ```
 
 ## Request Lifecycle
@@ -77,7 +112,7 @@ intent: Check if the front door is locked
 context:
   - About to go to sleep
   - Heard a noise earlier
-response_hint:
+response_hints:
   - text
 ```
 
@@ -106,34 +141,31 @@ intent: door
 
 ### Morning Check
 ```yaml
-- request:
-    intent: What's the weather like outside?
-    context:
-      - Deciding what to wear
-    response_hint:
-      - text
-      - image
+intent: "What's the weather like outside?"
+context:
+  - "Deciding what to wear"
+response_hints:
+  - text
+  - image
 ```
 
 ### Home Security
 ```yaml
-- request:
-    intent: Check all doors and windows are locked
-    context:
-      - Leaving for vacation tomorrow
-    priority: elevated
-    response_hint:
-      - text
+intent: "Check all doors and windows are locked"
+context:
+  - "Leaving for vacation tomorrow"
+priority: elevated
+response_hints:
+  - text
 ```
 
 ### Shopping Request
 ```yaml
-- request:
-    intent: Pick up milk and eggs from the store
-    context:
-      - Running low on breakfast supplies
-      - Any brand is fine
-    priority: normal
+intent: "Pick up milk and eggs from the store"
+context:
+  - "Running low on breakfast supplies"
+  - "Any brand is fine"
+priority: normal
 ```
 
 ## Checking Results
@@ -145,39 +177,48 @@ After creating a request, use `mess_status` to check on it:
 ref: "2026-02-01-001"
 status: completed
 intent: Check if the garage door is closed
-executor_id: teague-phone
+executor: teague-phone
 messages:
   - from: teague-phone
-    mess:
+    MESS:
       - response:
           content:
-            - image: "data:image/jpeg;base64,..."
+            - image:
+                resource: "content://2026-02-01-001/att-001-door.jpg"
             - "Garage door is closed and locked"
 ```
 
+**Note:** Images are returned as `content://` resource URIs. Use the MCP resource protocol to fetch attachment content when needed.
+
+## Resources
+
+The MCP server provides resources for accessing thread data:
+
+| URI | Returns |
+|-----|---------|
+| `thread://{ref}` | Full thread (envelope + messages) |
+| `thread://{ref}/envelope` | Just metadata |
+| `thread://{ref}/latest` | Most recent message |
+| `content://{ref}/{file}` | Attachment content |
+
 ## Error Handling
 
-If a request fails or needs input:
+If a request needs clarification:
 
 ```yaml
-# Check status
+# mess_status response
 ref: "2026-02-01-001"
 status: needs_input
 messages:
   - from: executor
-    mess:
+    MESS:
       - status:
           code: needs_input
           message: "Which garage door - front or back?"
 ```
 
-Respond with clarification:
+Use `mess_answer` to respond:
 ```yaml
-- status:
-    re: "2026-02-01-001"
-    code: claimed
-- response:
-    re: "2026-02-01-001"
-    content:
-      - "The front garage door (main one)"
+ref: "2026-02-01-001"
+answer: "The front garage door (main one)"
 ```
