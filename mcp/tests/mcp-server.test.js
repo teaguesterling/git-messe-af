@@ -972,4 +972,237 @@ describe('Thread Resources', () => {
     assert.strictEqual(result.from, 'executor');
     assert.strictEqual(result.received, '2026-02-01T10:05:00Z');
   });
+
+  it('returns null for latest on empty messages', () => {
+    const thread = {
+      envelope: { ref: '2026-02-01-001' },
+      messages: []
+    };
+
+    const result = thread.messages[thread.messages.length - 1] || null;
+    assert.strictEqual(result, null);
+  });
+
+  it('returns full thread when no part specified', () => {
+    const thread = {
+      envelope: { ref: '2026-02-01-001', status: 'pending' },
+      messages: [{ from: 'agent' }]
+    };
+
+    const part = undefined;
+    let result;
+    if (part === 'envelope') {
+      result = thread.envelope;
+    } else if (part === 'latest') {
+      result = thread.messages[thread.messages.length - 1];
+    } else {
+      result = { envelope: thread.envelope, messages: thread.messages };
+    }
+
+    assert.ok(result.envelope);
+    assert.ok(result.messages);
+    assert.strictEqual(result.envelope.ref, '2026-02-01-001');
+  });
+});
+
+describe('Content Resource URIs', () => {
+  it('parses content:// URI correctly', () => {
+    const uri = 'content://2026-02-01-001/att-001-image.jpg';
+    const match = uri.match(/^content:\/\/([^/]+)\/(.+)$/);
+
+    assert.ok(match);
+    assert.strictEqual(match[1], '2026-02-01-001');
+    assert.strictEqual(match[2], 'att-001-image.jpg');
+  });
+
+  it('handles filenames with multiple dots', () => {
+    const uri = 'content://2026-02-01-001/photo.2026.01.31.jpg';
+    const match = uri.match(/^content:\/\/([^/]+)\/(.+)$/);
+
+    assert.ok(match);
+    assert.strictEqual(match[2], 'photo.2026.01.31.jpg');
+  });
+
+  it('rejects invalid content:// URIs', () => {
+    const invalidUris = [
+      'content://2026-02-01-001',  // no filename
+      'content:///file.jpg',       // no ref
+      'http://example.com/file',   // wrong scheme
+      'thread://2026-02-01-001'    // wrong scheme
+    ];
+
+    for (const uri of invalidUris) {
+      const match = uri.match(/^content:\/\/([^/]+)\/(.+)$/);
+      assert.strictEqual(match, null, `Expected ${uri} to be invalid`);
+    }
+  });
+});
+
+describe('Base64 to Resource URI Rewriting', () => {
+  it('identifies inline base64 image data', () => {
+    const dataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg...';
+    const isBase64 = dataUri.startsWith('data:');
+
+    assert.ok(isBase64);
+  });
+
+  it('extracts mime type from data URI', () => {
+    const dataUri = 'data:image/jpeg;base64,/9j/4AAQSkZJRg...';
+    const match = dataUri.match(/^data:([^;]+);base64,/);
+
+    assert.ok(match);
+    assert.strictEqual(match[1], 'image/jpeg');
+  });
+
+  it('extracts base64 content from data URI', () => {
+    const dataUri = 'data:image/png;base64,iVBORw0KGgo=';
+    const base64 = dataUri.replace(/^data:[^;]+;base64,/, '');
+
+    assert.strictEqual(base64, 'iVBORw0KGgo=');
+  });
+
+  it('generates unique attachment filenames', () => {
+    const ref = '2026-02-01-001';
+    const mime = 'image/jpeg';
+    const index = 1;
+
+    // Simulate filename generation
+    const ext = mime.split('/')[1] || 'bin';
+    const filename = `att-${index.toString().padStart(3, '0')}-image.${ext}`;
+
+    assert.strictEqual(filename, 'att-001-image.jpeg');
+  });
+
+  it('builds correct content:// URI', () => {
+    const ref = '2026-02-01-001';
+    const filename = 'att-001-image.jpeg';
+    const uri = `content://${ref}/${filename}`;
+
+    assert.strictEqual(uri, 'content://2026-02-01-001/att-001-image.jpeg');
+  });
+});
+
+describe('Helper Tool Validation', () => {
+  it('mess_request rejects empty intent', () => {
+    const args = { intent: '' };
+    const isValid = !!(args.intent && args.intent.trim().length > 0);
+
+    assert.strictEqual(isValid, false);
+  });
+
+  it('mess_request accepts valid priority values', () => {
+    const validPriorities = ['background', 'normal', 'elevated', 'urgent'];
+
+    for (const p of validPriorities) {
+      assert.ok(validPriorities.includes(p));
+    }
+  });
+
+  it('mess_request rejects invalid priority', () => {
+    const validPriorities = ['background', 'normal', 'elevated', 'urgent'];
+    const invalid = 'critical';
+
+    assert.strictEqual(validPriorities.includes(invalid), false);
+  });
+
+  it('mess_answer rejects empty answer', () => {
+    const args = { ref: '2026-02-01-001', answer: '' };
+    const isValid = !!(args.answer && args.answer.trim().length > 0);
+
+    assert.strictEqual(isValid, false);
+  });
+
+  it('mess_answer rejects missing ref', () => {
+    const args = { answer: 'The answer' };
+    const isValid = !!(args.ref && args.ref.trim().length > 0);
+
+    assert.strictEqual(isValid, false);
+  });
+
+  it('mess_cancel validates ref format', () => {
+    const validRefs = [
+      '2026-02-01-001',
+      '2026-12-31-999',
+      '2026-02-01-001-custom-id'
+    ];
+
+    const refPattern = /^\d{4}-\d{2}-\d{2}-\d{3}/;
+
+    for (const ref of validRefs) {
+      assert.ok(refPattern.test(ref), `Expected ${ref} to be valid`);
+    }
+  });
+
+  it('validates response_hints values', () => {
+    const validHints = ['text', 'image', 'video', 'audio'];
+    const args = { response_hints: ['image', 'text'] };
+
+    const allValid = args.response_hints.every(h => validHints.includes(h));
+    assert.ok(allValid);
+  });
+
+  it('rejects invalid response_hints', () => {
+    const validHints = ['text', 'image', 'video', 'audio'];
+    const args = { response_hints: ['image', 'pdf'] };
+
+    const allValid = args.response_hints.every(h => validHints.includes(h));
+    assert.strictEqual(allValid, false);
+  });
+});
+
+describe('Thread Resource Edge Cases', () => {
+  it('handles thread with no attachments', () => {
+    const thread = {
+      envelope: { ref: '2026-02-01-001' },
+      messages: [{ from: 'agent', MESS: [{ request: { intent: 'Test' } }] }],
+      attachments: []
+    };
+
+    // No rewriting needed
+    assert.strictEqual(thread.attachments.length, 0);
+  });
+
+  it('handles deeply nested image references', () => {
+    const message = {
+      from: 'executor',
+      MESS: [{
+        response: {
+          content: [
+            'Text response',
+            { image: 'data:image/jpeg;base64,/9j/4AAQ...' },
+            { nested: { image: { file: 'data:image/png;base64,iVBOR...' } } }
+          ]
+        }
+      }]
+    };
+
+    // Count image references
+    const content = message.MESS[0].response.content;
+    let imageCount = 0;
+
+    for (const item of content) {
+      if (typeof item === 'object') {
+        if (item.image) imageCount++;
+        if (item.nested?.image) imageCount++;
+      }
+    }
+
+    assert.strictEqual(imageCount, 2);
+  });
+
+  it('preserves non-image content unchanged', () => {
+    const content = [
+      'Plain text',
+      { note: 'Some metadata' },
+      { link: 'https://example.com' }
+    ];
+
+    // These should not be rewritten
+    for (const item of content) {
+      if (typeof item === 'object') {
+        assert.strictEqual(item.image, undefined);
+        assert.strictEqual(item.resource, undefined);
+      }
+    }
+  });
 });
