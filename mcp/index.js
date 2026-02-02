@@ -13,9 +13,15 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema
+} from '@modelcontextprotocol/sdk/types.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
 import YAML from 'yaml';
 
 // Import shared MESSE-AF library
@@ -29,7 +35,8 @@ import {
   getFolderForStatus,
   STATUS_FOLDERS,
   MAX_FILE_SIZE,
-  MAX_INLINE_SIZE
+  MAX_INLINE_SIZE,
+  rewriteToResourceURIs
 } from '@messe-af/core';
 
 // Config
@@ -39,6 +46,125 @@ const GITHUB_REPO = process.env.MESS_GITHUB_REPO; // format: owner/repo
 const GITHUB_TOKEN = process.env.MESS_GITHUB_TOKEN;
 const GITHUB_ONLY = process.env.MESS_GITHUB_ONLY === 'true';
 const AGENT_ID = process.env.MESS_AGENT_ID || 'claude-agent';
+
+// Attachment cache directory
+const CACHE_DIR = process.env.MESS_CACHE_DIR || path.join(os.tmpdir(), 'mess-attachments');
+
+// In-memory registry of cached resources (thread -> attachments)
+const resourceRegistry = new Map();
+
+/**
+ * Cache an attachment and register it as a resource
+ * @param {string} ref - Thread reference
+ * @param {string} filename - Attachment filename
+ * @param {string} base64Data - Base64 encoded content
+ * @param {string} mime - MIME type
+ */
+async function cacheAttachment(ref, filename, base64Data, mime) {
+  const threadCacheDir = path.join(CACHE_DIR, ref);
+  await fs.mkdir(threadCacheDir, { recursive: true });
+
+  const filePath = path.join(threadCacheDir, filename);
+  await fs.writeFile(filePath, Buffer.from(base64Data, 'base64'));
+
+  // Register in resource registry
+  if (!resourceRegistry.has(ref)) {
+    resourceRegistry.set(ref, new Map());
+  }
+  resourceRegistry.get(ref).set(filename, { path: filePath, mime });
+
+  return filePath;
+}
+
+/**
+ * Get all registered resources
+ * @returns {Array} List of resource descriptors
+ */
+function getRegisteredResources() {
+  const resources = [];
+  for (const [ref, attachments] of resourceRegistry) {
+    for (const [filename, info] of attachments) {
+      resources.push({
+        uri: `content://${ref}/${filename}`,
+        name: filename,
+        mimeType: info.mime,
+        description: `Attachment from thread ${ref}`
+      });
+    }
+  }
+  return resources;
+}
+
+/**
+ * Read a resource by URI
+ * @param {string} uri - Resource URI (content://ref/filename)
+ * @returns {Object} Resource content
+ */
+async function readResource(uri) {
+  const match = uri.match(/^content:\/\/([^/]+)\/(.+)$/);
+  if (!match) {
+    throw new Error(`Invalid resource URI: ${uri}`);
+  }
+
+  const [, ref, filename] = match;
+
+  // Check registry first
+  const threadResources = resourceRegistry.get(ref);
+  if (threadResources?.has(filename)) {
+    const info = threadResources.get(filename);
+
+    // If content is stored directly in registry
+    if (info.content) {
+      return {
+        uri,
+        mimeType: info.mime,
+        blob: info.content
+      };
+    }
+
+    // If content is cached to file
+    if (info.path) {
+      const data = await fs.readFile(info.path);
+      return {
+        uri,
+        mimeType: info.mime,
+        blob: data.toString('base64')
+      };
+    }
+  }
+
+  // Try to load from thread directory (for pre-existing attachments)
+  const thread = await findThread(ref);
+  if (thread) {
+    const att = thread.attachments?.find(a => a.name === filename);
+    if (att) {
+      // If it's already base64, return directly
+      if (att.content) {
+        const mime = att.mime || guessMimeType(filename);
+        return {
+          uri,
+          mimeType: mime,
+          blob: att.content
+        };
+      }
+    }
+  }
+
+  throw new Error(`Resource not found: ${uri}`);
+}
+
+/**
+ * Guess MIME type from filename
+ */
+function guessMimeType(filename) {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  const mimeTypes = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+    gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf',
+    mp3: 'audio/mpeg', mp4: 'video/mp4', txt: 'text/plain'
+  };
+  return mimeTypes[ext] || 'application/octet-stream';
+}
 
 // ============ GitHub API ============
 class GitHubAPI {
@@ -615,10 +741,34 @@ async function getStatus(ref) {
     const found = await findThread(ref);
     if (!found) return { error: `Thread ${ref} not found` };
 
+    // Rewrite inline base64 to content:// resource URIs
+    const rewritten = rewriteToResourceURIs(
+      { envelope: found.envelope, messages: found.messages, attachments: found.attachments },
+      { cacheAttachment }
+    );
+
+    // Register any existing external attachments as resources
+    if (found.attachments) {
+      for (const att of found.attachments) {
+        if (!resourceRegistry.has(found.envelope.ref)) {
+          resourceRegistry.set(found.envelope.ref, new Map());
+        }
+        const mime = guessMimeType(att.name);
+        resourceRegistry.get(found.envelope.ref).set(att.name, {
+          path: null, // loaded on-demand from thread
+          mime,
+          content: att.content
+        });
+      }
+    }
+
     return {
-      ...found.envelope,
-      messages: found.messages,
-      attachments: found.attachments,
+      ...rewritten.envelope,
+      messages: rewritten.messages,
+      attachments: found.attachments?.map(a => ({
+        name: a.name,
+        resource: `content://${found.envelope.ref}/${a.name}`
+      })),
       folder: found.folder,
       source: found.source,
       format: found.format
@@ -708,8 +858,8 @@ async function getStatus(ref) {
 
 // ============ MCP Server ============
 const server = new Server(
-  { name: 'mess', version: '2.0.0' },
-  { capabilities: { tools: {} } }
+  { name: 'mess', version: '2.1.0' },
+  { capabilities: { tools: {}, resources: {} } }
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -770,6 +920,17 @@ Use to:
   ]
 }));
 
+// Resource handlers
+server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  resources: getRegisteredResources()
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+  const content = await readResource(uri);
+  return { contents: [content] };
+});
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
@@ -812,6 +973,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Start
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error(`MESS MCP Server v2 started`);
+console.error(`MESS MCP Server v2.1 started`);
 console.error(`  Local: ${GITHUB_ONLY ? 'disabled' : MESS_DIR}`);
 console.error(`  GitHub: ${github ? GITHUB_REPO : 'disabled'}`);
+console.error(`  Cache: ${CACHE_DIR}`);
