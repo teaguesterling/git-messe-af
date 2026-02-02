@@ -1,0 +1,19 @@
+{
+  "name": "@messe-af/core",
+  "version": "1.0.0",
+  "description": "MESSE-AF format parser, serializer, and converter",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./parser": "./parser.js",
+    "./serializer": "./serializer.js",
+    "./converter": "./converter.js"
+  },
+  "dependencies": {
+    "yaml": "^2.3.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

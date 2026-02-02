@@ -8,9 +8,16 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { parseThread, parseThreadV1, parseYamlDocs } from '../src/messe-af/parser.js';
-import { serializeThread, serializeThreadV1 } from '../src/messe-af/serializer.js';
-import { eventsToMesseAf, messeAfToEvents, getFolderForStatus } from '../src/messe-af/converter.js';
+import {
+  parseThread,
+  parseThreadV1,
+  parseYamlDocs,
+  serializeThread,
+  serializeThreadV1,
+  eventsToMesseAf,
+  messeAfToEvents,
+  getFolderForStatus
+} from '@messe-af/core';
 import { MesseAfStorage } from '../src/storage/messe-af-storage.js';
 import { FilesystemStorage } from '../src/storage/filesystem.js';
 import { createHandlers } from '../src/core.js';

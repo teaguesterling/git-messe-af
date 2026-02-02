@@ -1,0 +1,16 @@
+{
+  "name": "messe-af-cli",
+  "version": "1.0.0",
+  "description": "CLI for managing local MESSE-AF files",
+  "type": "module",
+  "bin": {
+    "mess": "index.js"
+  },
+  "dependencies": {
+    "@messe-af/core": "file:../lib/messe-af",
+    "yaml": "^2.3.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

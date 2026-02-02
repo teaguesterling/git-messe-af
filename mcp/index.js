@@ -18,6 +18,20 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import YAML from 'yaml';
 
+// Import shared MESSE-AF library
+import {
+  parseThread,
+  parseThreadV1,
+  serializeThread,
+  getAttachmentType,
+  getExtensionFromMime,
+  sanitizeFilename,
+  getFolderForStatus,
+  STATUS_FOLDERS,
+  MAX_FILE_SIZE,
+  MAX_INLINE_SIZE
+} from '@messe-af/core';
+
 // Config
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const MESS_DIR = process.env.MESS_DIR || path.join(__dirname, '..', 'exchange');
@@ -25,40 +39,6 @@ const GITHUB_REPO = process.env.MESS_GITHUB_REPO; // format: owner/repo
 const GITHUB_TOKEN = process.env.MESS_GITHUB_TOKEN;
 const GITHUB_ONLY = process.env.MESS_GITHUB_ONLY === 'true';
 const AGENT_ID = process.env.MESS_AGENT_ID || 'claude-agent';
-
-// Size limits (in bytes)
-const MAX_FILE_SIZE = 1024 * 1024;        // 1 MB - GitHub Contents API limit
-const MAX_INLINE_SIZE = 768 * 1024;       // 768 KB - inline attachment limit
-
-const STATUS_FOLDERS = {
-  pending: 'received', claimed: 'executing', in_progress: 'executing',
-  waiting: 'executing', held: 'executing', needs_input: 'executing',
-  needs_confirmation: 'executing', completed: 'finished', partial: 'finished',
-  failed: 'canceled', declined: 'canceled', cancelled: 'canceled',
-  expired: 'canceled', delegated: 'canceled', superseded: 'canceled'
-};
-
-// ============ Attachment Helpers ============
-function getAttachmentType(mimeType) {
-  if (mimeType?.startsWith('image/')) return 'image';
-  if (mimeType?.startsWith('audio/')) return 'audio';
-  if (mimeType?.startsWith('video/')) return 'video';
-  return 'file';
-}
-
-function sanitizeFilename(name) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/_+/g, '_');
-}
-
-function getExtensionFromMime(mimeType) {
-  const mimeToExt = {
-    'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
-    'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/mp4': 'm4a',
-    'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
-    'application/pdf': 'pdf', 'text/plain': 'txt'
-  };
-  return mimeToExt[mimeType] || 'bin';
-}
 
 // ============ GitHub API ============
 class GitHubAPI {
@@ -366,166 +346,6 @@ async function generateRef() {
   }
 
   return `${today}-${(maxNum + 1).toString().padStart(3, '0')}`;
-}
-
-// Serialize thread - returns array of { name, content } for directory format
-function serializeThread(envelope, messages, attachments = []) {
-  const files = [];
-
-  // Calculate current attachment serial from existing attachments
-  let nextAttachmentSerial = 1;
-  for (const att of attachments) {
-    const match = att.name.match(/^att-(\d+)-/);
-    if (match) {
-      const serial = parseInt(match[1]);
-      if (serial >= nextAttachmentSerial) nextAttachmentSerial = serial + 1;
-    }
-  }
-
-  // Start with envelope in file 000
-  let currentFileNum = 0;
-  let currentDocs = [envelope];
-  let currentSize = Buffer.byteLength(YAML.stringify(envelope, { lineWidth: -1 }));
-
-  // Process each message, potentially creating overflow files
-  for (const msg of messages) {
-    // Check for large inline attachments that need externalizing
-    const processedMsg = processMessageAttachments(msg, attachments, nextAttachmentSerial);
-    if (processedMsg.newAttachments) {
-      for (const att of processedMsg.newAttachments) {
-        attachments.push(att);
-        nextAttachmentSerial++;
-      }
-    }
-
-    const msgYaml = YAML.stringify(processedMsg.message, { lineWidth: -1 });
-    const msgSize = Buffer.byteLength(msgYaml);
-
-    // Would adding this message exceed the limit?
-    if (currentSize + msgSize + 4 > MAX_FILE_SIZE && currentDocs.length > 1) {
-      // Save current file and start new one
-      files.push({
-        name: `${currentFileNum.toString().padStart(3, '0')}-${envelope.ref}.messe-af.yaml`,
-        content: currentDocs.map(d => YAML.stringify(d, { lineWidth: -1 })).join('---\n')
-      });
-      currentFileNum++;
-      currentDocs = [];
-      currentSize = 0;
-    }
-
-    currentDocs.push(processedMsg.message);
-    currentSize += msgSize + 4; // +4 for "---\n"
-  }
-
-  // Save final file
-  if (currentDocs.length > 0) {
-    files.push({
-      name: `${currentFileNum.toString().padStart(3, '0')}-${envelope.ref}.messe-af.yaml`,
-      content: currentDocs.map(d => YAML.stringify(d, { lineWidth: -1 })).join('---\n')
-    });
-  }
-
-  // Add attachment files
-  for (const att of attachments) {
-    files.push({ name: att.name, content: att.content, binary: att.binary });
-  }
-
-  return files;
-}
-
-// Process message to externalize large attachments
-function processMessageAttachments(msg, existingAttachments, startSerial) {
-  const newAttachments = [];
-  let serial = startSerial;
-
-  // Deep clone the message to avoid modifying original
-  const processedMsg = JSON.parse(JSON.stringify(msg));
-
-  // Look for large inline attachments in MESS items
-  if (processedMsg.MESS) {
-    for (const item of processedMsg.MESS) {
-      if (item.response?.content) {
-        item.response.content = item.response.content.map(c => {
-          if (typeof c === 'object' && c.image) {
-            const dataUrl = c.image;
-            const size = Buffer.byteLength(dataUrl);
-
-            if (size > MAX_INLINE_SIZE) {
-              // Extract mime and data
-              const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-              if (match) {
-                const [, mime, base64Data] = match;
-                const type = getAttachmentType(mime);
-                const ext = getExtensionFromMime(mime);
-                const attName = `att-${serial.toString().padStart(3, '0')}-${type}-image.${ext}`;
-
-                newAttachments.push({
-                  name: attName,
-                  content: base64Data,
-                  binary: true
-                });
-                serial++;
-
-                // Replace with file reference
-                return {
-                  file: {
-                    path: attName,
-                    name: `image.${ext}`,
-                    mime: mime
-                  }
-                };
-              }
-            }
-          }
-          return c;
-        });
-      }
-    }
-  }
-
-  return { message: processedMsg, newAttachments };
-}
-
-// Parse thread from directory format
-function parseThread(files) {
-  // Sort yaml files by numeric prefix
-  const yamlFiles = files
-    .filter(f => f.name.endsWith('.messe-af.yaml'))
-    .sort((a, b) => {
-      const numA = parseInt(a.name.split('-')[0]);
-      const numB = parseInt(b.name.split('-')[0]);
-      return numA - numB;
-    });
-
-  if (yamlFiles.length === 0) {
-    throw new Error('No YAML files found in thread directory');
-  }
-
-  // Parse first file for envelope
-  const firstContent = yamlFiles[0].content;
-  const firstDocs = firstContent.split(/^---$/m).filter(d => d.trim()).map(d => YAML.parse(d));
-  const envelope = firstDocs[0];
-  const messages = firstDocs.slice(1);
-
-  // Parse remaining files for additional messages
-  for (let i = 1; i < yamlFiles.length; i++) {
-    const content = yamlFiles[i].content;
-    const docs = content.split(/^---$/m).filter(d => d.trim()).map(d => YAML.parse(d));
-    messages.push(...docs);
-  }
-
-  // Collect attachment info
-  const attachments = files
-    .filter(f => f.name.startsWith('att-'))
-    .map(f => ({ name: f.name, sha: f.sha }));
-
-  return { envelope, messages, attachments };
-}
-
-// Parse v1 flat file format
-function parseThreadV1(content) {
-  const docs = content.split(/^---$/m).filter(d => d.trim()).map(d => YAML.parse(d));
-  return { envelope: docs[0], messages: docs.slice(1), attachments: [] };
 }
 
 async function findThread(ref) {
