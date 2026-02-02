@@ -1,6 +1,6 @@
 ---
 name: mess-mcp
-description: MCP server tools for creating and managing MESS physical-world task requests. Provides 'mess' and 'mess_status' tools for Claude Desktop integration.
+description: MCP server tools for creating and managing MESS physical-world task requests. Provides 'mess', 'mess_status', and 'mess_capabilities' tools for Claude Desktop integration.
 ---
 
 # MESS MCP Server
@@ -190,6 +190,49 @@ attachments:
   }
 }
 ```
+
+### `mess_capabilities` - Discover Available Capabilities
+
+List physical-world capabilities that executors in this exchange can perform.
+
+**Input:** Optional `tag` filter
+
+#### List All Capabilities
+
+```yaml
+# No input needed
+```
+
+**Response:**
+```yaml
+- id: camera
+  description: Take and attach photos
+  tags: [attachments]
+- id: check-door
+  description: Check if doors are locked or closed
+  tags: [security, physical-access]
+- id: hands
+  description: Has human hands for physical manipulation
+  tags: [physical-access]
+```
+
+#### Filter by Tag
+
+```yaml
+tag: security
+```
+
+**Response:**
+```yaml
+- id: check-door
+  description: Check if doors are locked or closed
+  tags: [security, physical-access]
+- id: check-stove
+  description: Verify stove/oven is turned off
+  tags: [security, safety]
+```
+
+Use this to understand what kinds of tasks you can request. Capabilities are defined in `capabilities/*.yaml` in the exchange.
 
 ## Request Fields
 

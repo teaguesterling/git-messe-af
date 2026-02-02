@@ -7,7 +7,7 @@ An MCP (Model Context Protocol) server that enables AI agents like Claude to dis
 - **GitHub sync**: Tasks sync to/from your GitHub repository
 - **Local mode**: Store tasks locally without GitHub
 - **Hybrid mode**: Local storage with GitHub backup
-- Two tools: `mess` (create/update requests) and `mess_status` (check status)
+- Three tools: `mess`, `mess_status`, and `mess_capabilities`
 
 ## Installation
 
@@ -60,6 +60,7 @@ MESS_AGENT_ID=claude-desktop
 | `MESS_GITHUB_ONLY` | No | `false` | Set `true` to disable local storage |
 | `MESS_DIR` | No | `~/.mess` | Local directory for task files |
 | `MESS_AGENT_ID` | No | `claude-agent` | Identifier for this agent |
+| `MESS_CAPABILITIES_DIR` | No | `../capabilities` | Directory containing capability definitions |
 
 ## Setting up with Claude Desktop
 
@@ -209,6 +210,25 @@ Check status of requests.
 
 - Without `ref`: Lists all pending/in-progress requests
 - With `ref`: Returns full details including message history
+
+### `mess_capabilities`
+
+List available physical-world capabilities for this exchange.
+
+- Without `tag`: Lists all capabilities
+- With `tag`: Filters by tag (e.g., "security", "attachments")
+
+**Response format:**
+```yaml
+- id: camera
+  description: Take and attach photos
+  tags: [attachments]
+- id: check-door
+  description: Check if doors are locked or closed
+  tags: [security, physical-access]
+```
+
+Capabilities are defined in `capabilities/*.yaml` files. See [docs/capabilities.md](../docs/capabilities.md) for the format.
 
 ## Troubleshooting
 
