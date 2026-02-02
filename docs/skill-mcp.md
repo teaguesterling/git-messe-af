@@ -122,7 +122,7 @@ ref: "2026-02-01-001"
 reason: "No longer needed"
 ```
 
-### `mess_get_resource` - Fetch Resource Content
+### `mess_fetch` - Fetch Resource Content
 
 Fetch images, files, or thread data from MESS resource URIs.
 

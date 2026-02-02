@@ -1,6 +1,6 @@
 ---
 name: mess-mcp
-description: MCP server tools for creating and managing MESS physical-world task requests. Provides mess, mess_status, mess_capabilities, mess_request, mess_answer, mess_cancel, and mess_get_resource tools.
+description: MCP server tools for creating and managing MESS physical-world task requests. Provides mess, mess_status, mess_capabilities, mess_request, mess_answer, mess_cancel, and mess_fetch tools.
 ---
 
 # MESS MCP Server
@@ -132,7 +132,7 @@ attachments:
     resource: "content://2026-02-01-001-garage-check/att-002-image-door.jpg"
 ```
 
-**Note:** Images are returned as `content://` resource URIs instead of inline base64 to keep responses lightweight. Use `mess_get_resource` to fetch attachment content when needed.
+**Note:** Images are returned as `content://` resource URIs instead of inline base64 to keep responses lightweight. Use `mess_fetch` to fetch attachment content when needed.
 
 ## Configuration
 
@@ -275,7 +275,7 @@ ref: "2026-02-01-001"
 reason: "No longer needed"  # optional
 ```
 
-### `mess_get_resource` - Fetch Resource Content
+### `mess_fetch` - Fetch Resource Content
 
 **This is how you retrieve images and attachments.** When `mess_status` returns `content://` URIs, use this tool to fetch the actual content.
 
@@ -310,7 +310,7 @@ mess_status:
 # Response includes: resource: "content://2026-02-01-001/photo.jpg"
 
 # 2. Fetch the image
-mess_get_resource:
+mess_fetch:
   uri: "content://2026-02-01-001/photo.jpg"
 # Response includes base64 image data
 ```
@@ -421,10 +421,10 @@ image:
   size: 245891
 ```
 
-**To fetch the actual image, use `mess_get_resource`:**
+**To fetch the actual image, use `mess_fetch`:**
 
 ```yaml
-mess_get_resource:
+mess_fetch:
   uri: "content://2026-02-01-001/att-002-image-door.jpg"
 ```
 

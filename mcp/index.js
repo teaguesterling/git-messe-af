@@ -142,17 +142,17 @@ async function readResource(uri) {
 ## Tools
 - \`mess_request\` - Create a new physical-world task request
 - \`mess_status\` - Check status of requests (returns content:// URIs for attachments)
-- \`mess_get_resource\` - **Fetch images and attachments** from content:// URIs
+- \`mess_fetch\` - **Fetch images and attachments** from content:// URIs
 - \`mess_answer\` - Answer executor questions (when status is needs_input)
 - \`mess_cancel\` - Cancel a request
 - \`mess_capabilities\` - List available capabilities
 
 ## Fetching Attachments
 
-When \`mess_status\` returns a \`content://\` URI for an image, use \`mess_get_resource\` to fetch it:
+When \`mess_status\` returns a \`content://\` URI for an image, use \`mess_fetch\` to fetch it:
 
 \`\`\`yaml
-mess_get_resource:
+mess_fetch:
   uri: "content://2026-02-01-001/photo.jpg"
 \`\`\`
 
@@ -1162,13 +1162,13 @@ Use to:
 - Get responses from completed requests
 
 **Attachments:** Responses may include \`content://\` URIs for images/files.
-Use \`mess_get_resource\` to fetch the actual content:
-  mess_get_resource: { uri: "content://2026-02-01-001/photo.jpg" }
+Use \`mess_fetch\` to fetch the actual content:
+  mess_fetch: { uri: "content://2026-02-01-001/photo.jpg" }
 
-**Thread data:** Use \`mess_get_resource\` with \`thread://\` URIs:
-  mess_get_resource: { uri: "thread://2026-02-01-001" }
+**Thread data:** Use \`mess_fetch\` with \`thread://\` URIs:
+  mess_fetch: { uri: "thread://2026-02-01-001" }
 
-For full documentation: mess_get_resource: { uri: "mess://help" }`,
+For full documentation: mess_fetch: { uri: "mess://help" }`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -1252,7 +1252,7 @@ Use this when you no longer need the task completed.`,
       }
     },
     {
-      name: 'mess_get_resource',
+      name: 'mess_fetch',
       description: `Fetch a MESS resource by URI.
 
 Use this to retrieve images, files, thread data, or documentation.
@@ -1369,21 +1369,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: 'text', text: YAML.stringify(result) }] };
     }
 
-    if (name === 'mess_get_resource') {
+    if (name === 'mess_fetch') {
       const resource = await readResource(args.uri);
 
       // Handle different content types
       if (resource.blob) {
-        // Binary content (images, files) - return as base64 with metadata
+        const mimeType = resource.mimeType || 'application/octet-stream';
+
+        // Return as MCP embedded resource - works for all binary types
         return {
           content: [{
-            type: 'text',
-            text: YAML.stringify({
+            type: 'resource',
+            resource: {
               uri: resource.uri,
-              mimeType: resource.mimeType,
-              encoding: 'base64',
-              data: resource.blob
-            })
+              mimeType: mimeType,
+              blob: resource.blob
+            }
           }]
         };
       } else if (resource.text) {

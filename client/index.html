@@ -1431,10 +1431,10 @@
       showNewRequest: false,
       // Exchange-defined capabilities from capabilities/ directory (loaded on demand)
       exchangeCapabilities: [],
-      // Thread filters
+      // Thread filters (capableOnly and myClaimsOnly default to on)
       filters: {
-        capableOnly: false,      // Show only threads matching my capabilities
-        myClaimsOnly: false,     // Show only threads I've claimed (executing tab)
+        capableOnly: true,       // Show only threads matching my capabilities
+        myClaimsOnly: true,      // Show only threads I've claimed (executing tab)
         awaitingAnswer: false,   // Show threads with needs_input status (awaiting requestor answer)
         hasNewAnswer: false,     // Show threads that have a reply after needs_input
       },
@@ -2020,7 +2020,8 @@
 
       if (state.filters.myClaimsOnly && myId) {
         filtered = filtered.filter(t => {
-          // Check if any status message shows this executor claimed it
+          // Check thread envelope executor field or status messages
+          if (t.executor === myId) return true;
           return t.messages?.some(m =>
             m.MESS?.some(item => item.status?.executor === myId)
           );
@@ -3113,6 +3114,17 @@
         ? state.threads[state.currentFolder].find(t => t.ref === refOverride)
         : state.selectedThread;
       if (!thread) return;
+
+      // Check if this thread is claimed by another executor
+      const myId = state.config?.executorId;
+      const claimedBy = thread.messages?.find(m =>
+        m.MESS?.some(item => item.status?.code === 'claimed' && item.status?.executor)
+      )?.MESS?.find(item => item.status?.code === 'claimed')?.status?.executor;
+
+      if (claimedBy && claimedBy !== myId && ['complete', 'failed', 'needs_input'].includes(action)) {
+        const proceed = confirm(`This request is claimed by "${claimedBy}". Are you sure you want to ${action === 'complete' ? 'complete' : action === 'failed' ? 'mark as failed' : 'request input on'} it?`);
+        if (!proceed) return;
+      }
 
       // Capture form values and pending attachments BEFORE render() clears them
       const responseText = document.getElementById('response-text')?.value;

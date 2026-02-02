@@ -1337,31 +1337,31 @@ describe('Help Resource', () => {
 });
 
 describe('Tool Descriptions', () => {
-  it('mess_status description mentions content:// and mess_get_resource', () => {
+  it('mess_status description mentions content:// and mess_fetch', () => {
     const description = `**Attachments:** Responses may include \`content://\` URIs for images/files.
-Use \`mess_get_resource\` to fetch the actual content:
-  mess_get_resource: { uri: "content://2026-02-01-001/photo.jpg" }`;
+Use \`mess_fetch\` to fetch the actual content:
+  mess_fetch: { uri: "content://2026-02-01-001/photo.jpg" }`;
 
     assert.ok(description.includes('content://'));
-    assert.ok(description.includes('mess_get_resource'));
+    assert.ok(description.includes('mess_fetch'));
   });
 
-  it('mess_status description mentions thread:// and mess_get_resource', () => {
-    const description = `**Thread data:** Use \`mess_get_resource\` with \`thread://\` URIs:
-  mess_get_resource: { uri: "thread://2026-02-01-001" }`;
+  it('mess_status description mentions thread:// and mess_fetch', () => {
+    const description = `**Thread data:** Use \`mess_fetch\` with \`thread://\` URIs:
+  mess_fetch: { uri: "thread://2026-02-01-001" }`;
 
     assert.ok(description.includes('thread://'));
-    assert.ok(description.includes('mess_get_resource'));
+    assert.ok(description.includes('mess_fetch'));
   });
 
   it('mess_status description mentions mess://help', () => {
-    const description = `For full documentation: mess_get_resource: { uri: "mess://help" }`;
+    const description = `For full documentation: mess_fetch: { uri: "mess://help" }`;
 
     assert.ok(description.includes('mess://help'));
   });
 });
 
-describe('mess_get_resource Tool', () => {
+describe('mess_fetch Tool', () => {
   it('validates content:// URI format', () => {
     const uri = 'content://2026-02-01-001/photo.jpg';
     const match = uri.match(/^content:\/\/([^/]+)\/(.+)$/);
