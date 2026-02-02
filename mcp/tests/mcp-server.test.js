@@ -1401,35 +1401,258 @@ describe('mess_fetch Tool', () => {
       assert.ok(!isValid, `Expected ${uri} to be rejected`);
     }
   });
+});
 
-  it('handles binary response format', () => {
+describe('mess_fetch Content Type Handling', () => {
+  // Simulate the handler logic for testing
+  function simulateHandler(resource) {
+    if (resource.blob) {
+      const mimeType = resource.mimeType || 'application/octet-stream';
+      return {
+        content: [{
+          type: 'resource',
+          resource: {
+            uri: resource.uri,
+            mimeType: mimeType,
+            blob: resource.blob
+          }
+        }]
+      };
+    } else if (resource.text) {
+      return {
+        content: [{
+          type: 'text',
+          text: resource.text
+        }]
+      };
+    } else {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify(resource)
+        }]
+      };
+    }
+  }
+
+  // Image types
+  it('handles JPEG images correctly', () => {
     const resource = {
       uri: 'content://2026-02-01-001/photo.jpg',
       mimeType: 'image/jpeg',
       blob: '/9j/4AAQSkZJRg...'
     };
 
-    // Simulate what the handler does for binary content
-    const result = {
-      uri: resource.uri,
-      mimeType: resource.mimeType,
-      encoding: 'base64',
-      data: resource.blob
-    };
+    const result = simulateHandler(resource);
 
-    assert.strictEqual(result.encoding, 'base64');
-    assert.ok(result.data);
-    assert.strictEqual(result.mimeType, 'image/jpeg');
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'image/jpeg');
+    assert.strictEqual(result.content[0].resource.uri, resource.uri);
+    assert.strictEqual(result.content[0].resource.blob, resource.blob);
   });
 
-  it('handles text response format', () => {
+  it('handles PNG images correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/screenshot.png',
+      mimeType: 'image/png',
+      blob: 'iVBORw0KGgo...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'image/png');
+  });
+
+  it('handles GIF images correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/animation.gif',
+      mimeType: 'image/gif',
+      blob: 'R0lGODlh...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'image/gif');
+  });
+
+  it('handles WebP images correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/photo.webp',
+      mimeType: 'image/webp',
+      blob: 'UklGR...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'image/webp');
+  });
+
+  // Video types
+  it('handles MP4 video correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/video.mp4',
+      mimeType: 'video/mp4',
+      blob: 'AAAAIGZ0eXA...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'video/mp4');
+  });
+
+  it('handles WebM video correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/video.webm',
+      mimeType: 'video/webm',
+      blob: 'GkXfo...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'video/webm');
+  });
+
+  // Audio types
+  it('handles MP3 audio correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/recording.mp3',
+      mimeType: 'audio/mpeg',
+      blob: 'SUQzBAA...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'audio/mpeg');
+  });
+
+  it('handles WAV audio correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/recording.wav',
+      mimeType: 'audio/wav',
+      blob: 'UklGR...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'audio/wav');
+  });
+
+  // Document types
+  it('handles PDF documents correctly', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/document.pdf',
+      mimeType: 'application/pdf',
+      blob: 'JVBERi0xLjQ...'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'application/pdf');
+  });
+
+  // Unknown/generic binary
+  it('handles unknown binary with default mime type', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/data.bin',
+      mimeType: undefined,
+      blob: 'SGVsbG8gV29ybGQ='
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'resource');
+    assert.strictEqual(result.content[0].resource.mimeType, 'application/octet-stream');
+  });
+
+  // Text content
+  it('handles text content correctly', () => {
     const resource = {
       uri: 'mess://help',
       mimeType: 'text/markdown',
-      text: '# MESS Protocol Help\n...'
+      text: '# MESS Protocol Help\n\nThis is the documentation.'
     };
 
-    // Text content is returned directly
-    assert.ok(resource.text.startsWith('#'));
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'text');
+    assert.ok(result.content[0].text.includes('MESS Protocol Help'));
   });
+
+  it('handles thread data as text', () => {
+    const resource = {
+      uri: 'thread://2026-02-01-001',
+      text: 'ref: 2026-02-01-001\nstatus: completed'
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'text');
+    assert.ok(result.content[0].text.includes('2026-02-01-001'));
+  });
+
+  // Structured data (no blob, no text)
+  it('handles structured data as JSON', () => {
+    const resource = {
+      envelope: { ref: '2026-02-01-001', status: 'completed' },
+      messages: []
+    };
+
+    const result = simulateHandler(resource);
+
+    assert.strictEqual(result.content[0].type, 'text');
+    const parsed = JSON.parse(result.content[0].text);
+    assert.strictEqual(parsed.envelope.ref, '2026-02-01-001');
+  });
+
+  // Verify all binary types return 'resource' type, not 'text'
+  it('all binary types return resource type not text', () => {
+    const binaryResources = [
+      { uri: 'content://ref/a.jpg', mimeType: 'image/jpeg', blob: 'data' },
+      { uri: 'content://ref/a.png', mimeType: 'image/png', blob: 'data' },
+      { uri: 'content://ref/a.gif', mimeType: 'image/gif', blob: 'data' },
+      { uri: 'content://ref/a.webp', mimeType: 'image/webp', blob: 'data' },
+      { uri: 'content://ref/a.mp4', mimeType: 'video/mp4', blob: 'data' },
+      { uri: 'content://ref/a.webm', mimeType: 'video/webm', blob: 'data' },
+      { uri: 'content://ref/a.mp3', mimeType: 'audio/mpeg', blob: 'data' },
+      { uri: 'content://ref/a.wav', mimeType: 'audio/wav', blob: 'data' },
+      { uri: 'content://ref/a.pdf', mimeType: 'application/pdf', blob: 'data' },
+      { uri: 'content://ref/a.zip', mimeType: 'application/zip', blob: 'data' },
+    ];
+
+    for (const resource of binaryResources) {
+      const result = simulateHandler(resource);
+      assert.strictEqual(
+        result.content[0].type,
+        'resource',
+        `Expected ${resource.mimeType} to return 'resource' type, got '${result.content[0].type}'`
+      );
+    }
+  });
+
+  // Verify resource structure has all required fields
+  it('resource response has all required fields', () => {
+    const resource = {
+      uri: 'content://2026-02-01-001/photo.jpg',
+      mimeType: 'image/jpeg',
+      blob: '/9j/4AAQSkZJRg...'
+    };
+
+    const result = simulateHandler(resource);
+    const content = result.content[0];
+
+    assert.strictEqual(content.type, 'resource');
+    assert.ok(content.resource, 'resource field should exist');
+    assert.ok(content.resource.uri, 'uri should exist');
+    assert.ok(content.resource.mimeType, 'mimeType should exist');
+    assert.ok(content.resource.blob, 'blob should exist');
+  });
+
 });
