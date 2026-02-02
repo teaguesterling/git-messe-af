@@ -76,12 +76,16 @@ Base: `/api/v1/exchanges/{exchange_id}`
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/register` | No | Register executor, get API key |
+| GET | `/capabilities` | Yes | List exchange capabilities |
 | GET | `/requests` | Yes | List threads (`?status=pending`) |
 | POST | `/requests` | Yes | Create request |
 | GET | `/requests/:ref` | Yes | Get thread details |
 | PATCH | `/requests/:ref` | Yes | Update status / add message |
+| GET | `/requests/:ref/attachments/:filename` | Yes | Download attachment |
 | GET | `/executors` | Yes | List executors |
 | PATCH | `/executors/:id` | Yes | Update your profile |
+| POST | `/import` | Yes | Import MESSE-AF thread |
+| GET | `/export/:ref` | Yes | Export thread to MESSE-AF |
 
 ### Authentication
 
@@ -277,3 +281,50 @@ Available in hook configurations:
 | `{{requestor_id}}` | Requestor ID |
 | `{{executor_id}}` | Assigned executor ID |
 | `{{event}}` | Event type (created, claimed, etc.) |
+
+## Capabilities
+
+Capabilities describe what physical-world actions executors can perform. Define them in YAML files:
+
+```bash
+CAPABILITIES_DIR=./capabilities   # Default: ./capabilities
+```
+
+Capabilities file format (multi-doc YAML):
+
+```yaml
+id: camera
+description: Take and attach photos
+tags: [visual, attachments]
+---
+id: check-door
+description: Check if doors are locked
+tags: [security, physical-access]
+```
+
+Query capabilities via API:
+
+```bash
+# List all
+curl http://localhost:3000/api/v1/exchanges/home/capabilities \
+  -H "Authorization: Bearer mess_home_..."
+
+# Filter by tag
+curl "http://localhost:3000/api/v1/exchanges/home/capabilities?tag=security" \
+  -H "Authorization: Bearer mess_home_..."
+```
+
+See [docs/capabilities.md](../docs/capabilities.md) for the full specification.
+
+## Attachments
+
+Attachments from responses can be fetched directly:
+
+```bash
+# Get attachment from a thread
+curl http://localhost:3000/api/v1/exchanges/home/requests/2025-02-01-ABC1/attachments/photo.jpg \
+  -H "Authorization: Bearer mess_home_..." \
+  -o photo.jpg
+```
+
+Supported content types are automatically detected from file extension (jpg, png, gif, pdf, mp4, etc.).

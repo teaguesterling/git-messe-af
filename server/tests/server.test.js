@@ -18,6 +18,8 @@ import {
   parseApiKey,
   todayPath,
   createHandlers,
+  parseSimpleYaml,
+  findAttachmentInMess,
 } from '../src/core.js';
 
 import { FilesystemStorage } from '../src/storage/filesystem.js';
@@ -635,5 +637,238 @@ describe('Event Schema', () => {
     assert.ok(eventTypes.has('thread_created'));
     assert.ok(eventTypes.has('status_changed'));
     assert.ok(eventTypes.has('message_added'));
+  });
+});
+
+// ============ Helper Functions Tests ============
+
+describe('parseSimpleYaml', () => {
+  it('parses simple key-value pairs', () => {
+    const yaml = `
+id: test-cap
+description: A test capability
+`;
+    const result = parseSimpleYaml(yaml);
+    assert.strictEqual(result.id, 'test-cap');
+    assert.strictEqual(result.description, 'A test capability');
+  });
+
+  it('parses inline arrays', () => {
+    const yaml = `
+id: test
+tags: [a, b, c]
+`;
+    const result = parseSimpleYaml(yaml);
+    assert.deepStrictEqual(result.tags, ['a', 'b', 'c']);
+  });
+
+  it('parses multi-line arrays', () => {
+    const yaml = `
+id: test
+tags:
+  - first
+  - second
+`;
+    const result = parseSimpleYaml(yaml);
+    assert.deepStrictEqual(result.tags, ['first', 'second']);
+  });
+
+  it('ignores comments', () => {
+    const yaml = `
+# This is a comment
+id: test
+# Another comment
+description: desc
+`;
+    const result = parseSimpleYaml(yaml);
+    assert.strictEqual(result.id, 'test');
+    assert.strictEqual(result.description, 'desc');
+  });
+});
+
+describe('findAttachmentInMess', () => {
+  it('finds image attachment in response', () => {
+    const mess = [
+      {
+        response: {
+          content: [
+            { image: { name: 'photo.jpg', data: 'base64data' } },
+            'Text description'
+          ]
+        }
+      }
+    ];
+    const result = findAttachmentInMess(mess, 'photo.jpg');
+    assert.strictEqual(result, 'base64data');
+  });
+
+  it('finds attachment in response', () => {
+    const mess = [
+      {
+        response: {
+          content: [
+            { attachment: { name: 'doc.pdf', data: 'pdfdata' } }
+          ]
+        }
+      }
+    ];
+    const result = findAttachmentInMess(mess, 'doc.pdf');
+    assert.strictEqual(result, 'pdfdata');
+  });
+
+  it('finds attachment in request', () => {
+    const mess = [
+      {
+        request: {
+          intent: 'Test',
+          attachments: [
+            { name: 'file.txt', data: 'filedata' }
+          ]
+        }
+      }
+    ];
+    const result = findAttachmentInMess(mess, 'file.txt');
+    assert.strictEqual(result, 'filedata');
+  });
+
+  it('returns null for missing attachment', () => {
+    const mess = [
+      { response: { content: ['Just text'] } }
+    ];
+    const result = findAttachmentInMess(mess, 'missing.jpg');
+    assert.strictEqual(result, null);
+  });
+
+  it('handles empty mess array', () => {
+    const result = findAttachmentInMess([], 'any.jpg');
+    assert.strictEqual(result, null);
+  });
+
+  it('handles non-array input', () => {
+    const result = findAttachmentInMess(null, 'any.jpg');
+    assert.strictEqual(result, null);
+  });
+});
+
+// ============ Capabilities Tests ============
+
+describe('handleListCapabilities', () => {
+  let tempDir;
+  let capDir;
+  let storage;
+  let handlers;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mess-cap-test-'));
+    capDir = path.join(tempDir, 'capabilities');
+    await fs.mkdir(capDir);
+
+    storage = new FilesystemStorage(tempDir);
+
+    // Set environment variable for capabilities directory
+    process.env.CAPABILITIES_DIR = capDir;
+
+    handlers = createHandlers(storage);
+  });
+
+  afterEach(async () => {
+    delete process.env.CAPABILITIES_DIR;
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('returns empty list when no capabilities exist', async () => {
+    const result = await handlers.handleListCapabilities('home');
+    assert.strictEqual(result.status, 200);
+    assert.deepStrictEqual(result.data.capabilities, []);
+  });
+
+  it('loads capabilities from YAML files', async () => {
+    await fs.writeFile(path.join(capDir, 'test.yaml'), `
+id: camera
+description: Take photos
+tags: [visual]
+`);
+
+    const result = await handlers.handleListCapabilities('home');
+    assert.strictEqual(result.status, 200);
+    assert.strictEqual(result.data.capabilities.length, 1);
+    assert.strictEqual(result.data.capabilities[0].id, 'camera');
+    assert.strictEqual(result.data.capabilities[0].description, 'Take photos');
+    assert.deepStrictEqual(result.data.capabilities[0].tags, ['visual']);
+  });
+
+  it('loads multi-doc YAML', async () => {
+    await fs.writeFile(path.join(capDir, 'multi.yaml'), `
+id: first
+description: First cap
+---
+id: second
+description: Second cap
+`);
+
+    const result = await handlers.handleListCapabilities('home');
+    assert.strictEqual(result.data.capabilities.length, 2);
+    assert.strictEqual(result.data.capabilities[0].id, 'first');
+    assert.strictEqual(result.data.capabilities[1].id, 'second');
+  });
+
+  it('filters by tag', async () => {
+    await fs.writeFile(path.join(capDir, 'caps.yaml'), `
+id: camera
+description: Take photos
+tags: [visual, attachments]
+---
+id: door-check
+description: Check doors
+tags: [security]
+`);
+
+    const result = await handlers.handleListCapabilities('home', { tag: 'visual' });
+    assert.strictEqual(result.data.capabilities.length, 1);
+    assert.strictEqual(result.data.capabilities[0].id, 'camera');
+  });
+});
+
+// ============ Attachment Handler Tests ============
+
+describe('handleGetAttachment', () => {
+  let tempDir;
+  let storage;
+  let handlers;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mess-att-test-'));
+    storage = new FilesystemStorage(tempDir);
+    handlers = createHandlers(storage);
+  });
+
+  afterEach(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('rejects path traversal attempts', async () => {
+    const { data } = await handlers.handleRegister('home', { executor_id: 'phone' });
+    const auth = await handlers.authenticate(data.api_key);
+
+    const result = await handlers.handleGetAttachment(auth, '2026-01-01-XXXX', '../etc/passwd');
+    assert.strictEqual(result.status, 400);
+    assert.strictEqual(result.error, 'Invalid filename');
+  });
+
+  it('rejects slashes in filename', async () => {
+    const { data } = await handlers.handleRegister('home', { executor_id: 'phone' });
+    const auth = await handlers.authenticate(data.api_key);
+
+    const result = await handlers.handleGetAttachment(auth, '2026-01-01-XXXX', 'path/to/file.jpg');
+    assert.strictEqual(result.status, 400);
+    assert.strictEqual(result.error, 'Invalid filename');
+  });
+
+  it('returns 404 for missing attachment', async () => {
+    const { data } = await handlers.handleRegister('home', { executor_id: 'phone' });
+    const auth = await handlers.authenticate(data.api_key);
+
+    const result = await handlers.handleGetAttachment(auth, '2026-01-01-XXXX', 'missing.jpg');
+    assert.strictEqual(result.status, 404);
   });
 });

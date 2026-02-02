@@ -87,6 +87,17 @@ app.post('/api/v1/exchanges/:exchangeId/register', async (req, res) => {
 // Protected routes
 app.use('/api/v1/exchanges/:exchangeId', authenticate, validateExchange);
 
+// List capabilities (can also be public - no auth needed)
+app.get('/api/v1/exchanges/:exchangeId/capabilities', async (req, res) => {
+  try {
+    const result = await handlers.handleListCapabilities(req.params.exchangeId, req.query);
+    res.status(result.status).json(result.data);
+  } catch (e) {
+    console.error('Capabilities error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // List requests
 app.get('/api/v1/exchanges/:exchangeId/requests', async (req, res) => {
   try {
@@ -136,6 +147,37 @@ app.patch('/api/v1/exchanges/:exchangeId/requests/:ref', async (req, res) => {
     res.status(result.status).json(result.data);
   } catch (e) {
     console.error('Update error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get attachment from request
+app.get('/api/v1/exchanges/:exchangeId/requests/:ref/attachments/:filename', async (req, res) => {
+  try {
+    const result = await handlers.handleGetAttachment(req.auth, req.params.ref, req.params.filename);
+    if (result.error) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    // Determine content type from filename
+    const ext = req.params.filename.split('.').pop()?.toLowerCase();
+    const contentTypes = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'pdf': 'application/pdf',
+      'mp4': 'video/mp4',
+      'webm': 'video/webm',
+      'mp3': 'audio/mpeg',
+      'wav': 'audio/wav',
+    };
+    const contentType = contentTypes[ext] || 'application/octet-stream';
+
+    res.type(contentType).send(result.data.content);
+  } catch (e) {
+    console.error('Attachment error:', e);
     res.status(500).json({ error: e.message });
   }
 });

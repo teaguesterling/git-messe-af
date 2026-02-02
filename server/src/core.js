@@ -80,6 +80,89 @@ export function parseApiKey(apiKey) {
   return { valid: true, exchangeId: parts[1] };
 }
 
+/**
+ * Simple YAML parser for capability format
+ * Handles basic key: value pairs and arrays
+ */
+export function parseSimpleYaml(text) {
+  const result = {};
+  const lines = text.trim().split('\n');
+  let currentKey = null;
+  let currentArray = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    // Array item
+    if (trimmed.startsWith('- ')) {
+      if (currentArray !== null) {
+        currentArray.push(trimmed.slice(2).trim());
+      }
+      continue;
+    }
+
+    // Key: value pair
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx > 0) {
+      const key = trimmed.slice(0, colonIdx).trim();
+      const value = trimmed.slice(colonIdx + 1).trim();
+
+      if (value === '' || value.startsWith('[')) {
+        // Start of array or inline array
+        if (value.startsWith('[') && value.endsWith(']')) {
+          // Inline array: [a, b, c]
+          result[key] = value.slice(1, -1).split(',').map(s => s.trim());
+        } else {
+          // Multi-line array
+          currentKey = key;
+          currentArray = [];
+          result[key] = currentArray;
+        }
+      } else {
+        result[key] = value;
+        currentKey = null;
+        currentArray = null;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Search MESS content for an attachment with the given filename
+ * Returns base64 content if found
+ */
+export function findAttachmentInMess(mess, filename) {
+  if (!Array.isArray(mess)) return null;
+
+  for (const item of mess) {
+    // Check response content
+    if (item.response?.content) {
+      for (const content of item.response.content) {
+        if (content.image?.data && content.image.name === filename) {
+          return content.image.data;
+        }
+        if (content.attachment?.data && content.attachment.name === filename) {
+          return content.attachment.data;
+        }
+      }
+    }
+
+    // Check request attachments
+    if (item.request?.attachments) {
+      for (const att of item.request.attachments) {
+        if (att.data && att.name === filename) {
+          return att.data;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 // ============ Google OAuth Helper ============
 
 /**
@@ -976,6 +1059,114 @@ export function createHandlers(storage) {
     }
   }
 
+  // ---- Capabilities Handler ----
+
+  /**
+   * List exchange capabilities
+   * Loads from YAML files in the capabilities directory (filesystem only)
+   * @param {string} exchangeId - Exchange ID
+   * @param {Object} query - Query options (tag filter)
+   */
+  async function handleListCapabilities(exchangeId, query = {}) {
+    const capabilitiesDir = process.env.CAPABILITIES_DIR || './capabilities';
+    const capabilities = [];
+
+    try {
+      // Use direct fs access for capabilities (works for Node.js deployments)
+      const fs = await import('fs/promises');
+      const path = await import('path');
+
+      const absDir = path.resolve(capabilitiesDir);
+      const entries = await fs.readdir(absDir);
+      const yamlFiles = entries.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
+
+      for (const file of yamlFiles) {
+        const content = await fs.readFile(path.join(absDir, file), 'utf8');
+        if (!content) continue;
+
+        // Parse multi-doc YAML (split by ---)
+        const docs = content.split(/^---$/m).filter(d => d.trim());
+
+        for (const doc of docs) {
+          try {
+            // Simple YAML parsing for capability format
+            const cap = parseSimpleYaml(doc);
+            if (cap && cap.id) {
+              capabilities.push({
+                id: cap.id,
+                description: cap.description || '',
+                tags: cap.tags || []
+              });
+            }
+          } catch (e) {
+            console.error(`Failed to parse capability in ${file}:`, e.message);
+          }
+        }
+      }
+    } catch (e) {
+      // Capabilities dir may not exist or fs not available - that's OK
+      if (e.code !== 'ENOENT') {
+        console.error('Capabilities load error:', e.message);
+      }
+    }
+
+    // Filter by tag if specified
+    let filtered = capabilities;
+    if (query.tag) {
+      filtered = capabilities.filter(c => c.tags?.includes(query.tag));
+    }
+
+    return { data: { capabilities: filtered }, status: 200 };
+  }
+
+  // ---- Attachment Handler ----
+
+  /**
+   * Get attachment from a thread
+   * @param {Object} auth - Authenticated executor
+   * @param {string} ref - Thread reference
+   * @param {string} filename - Attachment filename
+   */
+  async function handleGetAttachment(auth, ref, filename) {
+    // Validate filename to prevent path traversal
+    if (filename.includes('..') || filename.includes('/')) {
+      return { error: 'Invalid filename', status: 400 };
+    }
+
+    // Check if storage supports direct attachment access
+    if (typeof storage.getAttachment === 'function') {
+      const data = await storage.getAttachment(auth.exchange_id, ref, filename);
+      if (!data) {
+        return { error: 'Attachment not found', status: 404 };
+      }
+      return { data: { content: data, filename }, status: 200 };
+    }
+
+    // For MESSE-AF storage, try to find the attachment in the thread directory
+    // Try v2 format first: exchange={id}/state={folder}/{ref}/attachments/{filename}
+    for (const folder of ['received', 'executing', 'finished', 'canceled']) {
+      const attachmentPath = `exchange=${auth.exchange_id}/state=${folder}/${ref}/attachments/${filename}`;
+      const data = await storage.get(attachmentPath);
+      if (data) {
+        return { data: { content: data, filename }, status: 200 };
+      }
+    }
+
+    // For event-sourced storage, attachments may be embedded in events
+    // Search through message events for base64 attachments
+    const events = await getThreadEvents(auth.exchange_id, ref);
+    for (const event of events) {
+      if (event.event_type === 'message_added' && event.payload?.mess) {
+        const content = findAttachmentInMess(event.payload.mess, filename);
+        if (content) {
+          return { data: { content: Buffer.from(content, 'base64'), filename }, status: 200 };
+        }
+      }
+    }
+
+    return { error: 'Attachment not found', status: 404 };
+  }
+
   return {
     authenticate,
     handleRegister,
@@ -987,6 +1178,8 @@ export function createHandlers(storage) {
     handleUpdateExecutor,
     handleImportThread,
     handleExportThread,
+    handleListCapabilities,
+    handleGetAttachment,
     // Expose for testing/advanced use
     executeHooks,
     templateExpand,
