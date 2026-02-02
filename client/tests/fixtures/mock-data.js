@@ -120,10 +120,10 @@ export function encodeContent(content) {
 }
 
 // Create a mock file list response
-export function mockFileList(threads) {
+export function mockFileList(threads, folder = 'received') {
   return threads.map(t => ({
     name: `${t.ref}.messe-af.yaml`,
-    path: `exchange/state=received/${t.ref}.messe-af.yaml`,
+    path: `exchange/state=${folder}/${t.ref}.messe-af.yaml`,
     sha: `sha-${t.ref}`,
     type: 'file'
   }));

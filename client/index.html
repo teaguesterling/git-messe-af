@@ -972,6 +972,7 @@
             // Handle v2 format with move - delete old files
             else if (needsMove) {
               const oldFiles = await this.getDirectory(thread._path);
+              console.log('[GitHub] getDirectory for move:', thread._path, oldFiles ? `${oldFiles.length} files` : 'null');
               if (oldFiles) {
                 for (const file of oldFiles) {
                   treeEntries.push({
@@ -981,6 +982,8 @@
                     sha: null
                   });
                 }
+              } else {
+                console.warn('[GitHub] WARNING: getDirectory returned null, old files will not be deleted!');
               }
             }
 
@@ -994,6 +997,16 @@
                 content: f.binary ? atob(f.content) : f.content
               });
             }
+
+            // Debug logging for tree operations
+            console.log('[GitHub] updateThread:', {
+              format: thread._format,
+              needsMove,
+              oldPath: thread._path,
+              destPath,
+              deletes: treeEntries.filter(e => e.sha === null).map(e => e.path),
+              creates: treeEntries.filter(e => e.content).map(e => e.path)
+            });
 
             const treeData = await this.request('/git/trees', {
               method: 'POST',
