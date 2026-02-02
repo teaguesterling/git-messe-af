@@ -1433,9 +1433,16 @@
       exchangeCapabilities: [],
       // Thread filters
       filters: {
-        capableOnly: false,  // Show only threads matching my capabilities
-        myClaimsOnly: false, // Show only threads I've claimed (executing tab)
+        capableOnly: false,      // Show only threads matching my capabilities
+        myClaimsOnly: false,     // Show only threads I've claimed (executing tab)
+        awaitingAnswer: false,   // Show threads with needs_input status (awaiting requestor answer)
+        hasNewAnswer: false,     // Show threads that have a reply after needs_input
       },
+      // Lightbox state for viewing images
+      lightboxImage: null,
+      // Periodic sync
+      syncInterval: null,
+      lastSyncTime: null,
       // Track recently modified threads to preserve during refresh
       recentlyModified: new Map(), // ref -> { folder, thread, expires }
       // Pending attachments for response
@@ -1453,11 +1460,63 @@
         state.view = 'main';
         render();
         refresh();
+        // Start periodic sync (every 30 seconds)
+        startPeriodicSync();
       } else {
         state.view = 'setup';
         state.setupStep = 1;
         render();
       }
+    }
+
+    function startPeriodicSync() {
+      if (state.syncInterval) clearInterval(state.syncInterval);
+      state.syncInterval = setInterval(async () => {
+        if (!state.github || state.view !== 'main') return;
+        const previousThreads = JSON.stringify(state.threads.executing);
+        await refresh();
+        const currentThreads = JSON.stringify(state.threads.executing);
+        // Check if any needs_input threads now have replies
+        if (previousThreads !== currentThreads) {
+          checkForAnsweredQuestions();
+        }
+        state.lastSyncTime = Date.now();
+      }, 30000);
+    }
+
+    function checkForAnsweredQuestions() {
+      const myId = state.config?.executorId;
+      if (!myId) return;
+
+      for (const thread of state.threads.executing || []) {
+        if (hasNewAnswer(thread, myId)) {
+          // Show notification if supported
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('Question Answered', {
+              body: `Reply received for: ${thread.intent}`,
+              icon: '/icons/icon-192.png',
+              tag: thread.ref
+            });
+          }
+        }
+      }
+    }
+
+    // Check if a thread has a reply after a needs_input status from this executor
+    function hasNewAnswer(thread, executorId) {
+      const messages = thread.messages || [];
+      let foundNeedsInput = false;
+      for (const msg of messages) {
+        for (const item of msg.MESS || []) {
+          if (item.status?.code === 'needs_input' && item.status?.executor === executorId) {
+            foundNeedsInput = true;
+          }
+          if (foundNeedsInput && item.reply) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
 
     // ============ Render Functions ============
@@ -1483,6 +1542,10 @@
           if (state.showNewRequest) {
             app.insertAdjacentHTML('beforeend', renderNewRequestModal());
             bindNewRequestEvents();
+          }
+          if (state.lightboxImage) {
+            app.insertAdjacentHTML('beforeend', renderLightbox());
+            bindLightboxEvents();
           }
           break;
         default:
@@ -1964,6 +2027,18 @@
         });
       }
 
+      // Filter for threads awaiting answer (needs_input with no reply yet)
+      if (state.filters.awaitingAnswer && myId) {
+        filtered = filtered.filter(t => {
+          return t.status === 'needs_input' && !hasNewAnswer(t, myId);
+        });
+      }
+
+      // Filter for threads that have received an answer
+      if (state.filters.hasNewAnswer && myId) {
+        filtered = filtered.filter(t => hasNewAnswer(t, myId));
+      }
+
       return filtered;
     }
 
@@ -1980,7 +2055,8 @@
       ];
 
       const canRequest = state.config?.canRequest !== false;
-      const hasFilters = state.filters.capableOnly || state.filters.myClaimsOnly;
+      const hasFilters = state.filters.capableOnly || state.filters.myClaimsOnly ||
+                         state.filters.awaitingAnswer || state.filters.hasNewAnswer;
       
       return `
         <div class="h-screen flex flex-col bg-page">
@@ -2031,7 +2107,7 @@
           </div>
 
           <!-- Filters -->
-          <div class="flex items-center gap-2 px-3 py-2 bg-card border-b text-sm">
+          <div class="flex items-center gap-2 px-3 py-2 bg-card border-b text-sm flex-wrap">
             <span class="text-muted">Filter:</span>
             <label class="chip ${state.filters.capableOnly ? 'selected' : ''}" style="font-size:0.75rem">
               <input type="checkbox" id="filter-capable" class="sr-only" ${state.filters.capableOnly ? 'checked' : ''}>
@@ -2040,7 +2116,15 @@
             ${state.currentFolder === 'executing' ? `
               <label class="chip ${state.filters.myClaimsOnly ? 'selected' : ''}" style="font-size:0.75rem">
                 <input type="checkbox" id="filter-my-claims" class="sr-only" ${state.filters.myClaimsOnly ? 'checked' : ''}>
-                My claims only
+                My claims
+              </label>
+              <label class="chip ${state.filters.awaitingAnswer ? 'selected' : ''}" style="font-size:0.75rem">
+                <input type="checkbox" id="filter-awaiting" class="sr-only" ${state.filters.awaitingAnswer ? 'checked' : ''}>
+                Awaiting answer
+              </label>
+              <label class="chip ${state.filters.hasNewAnswer ? 'selected' : ''}" style="font-size:0.75rem">
+                <input type="checkbox" id="filter-answered" class="sr-only" ${state.filters.hasNewAnswer ? 'checked' : ''}>
+                Has reply
               </label>
             ` : ''}
             ${hasFilters && filteredCount > 0 ? `
@@ -2305,7 +2389,7 @@
               ${content.response ? `
                 ${content.response.content?.map(c => {
                   if (typeof c === 'object' && c.image) {
-                    return `<img src="${c.image}" class="rounded-xl border mb-2" style="max-width:100%;max-height:200px">`;
+                    return `<img src="${c.image}" class="rounded-xl border mb-2 cursor-pointer lightbox-trigger" style="max-width:100%;max-height:200px" title="Click to enlarge">`;
                   } else if (typeof c === 'object' && c.location) {
                     const loc = c.location;
                     const mapsUrl = `https://www.google.com/maps?q=${loc.lat},${loc.lng}`;
@@ -2337,8 +2421,34 @@
                 }).join('') || ''}
                 ${content.response.notes ? `<p class="mt-3 text-sm font-medium text-primary border-t pt-3">📝 ${content.response.notes}</p>` : ''}
               ` : ''}
+              ${content.reply ? `
+                <div class="space-y-2">
+                  ${content.reply.text ? `<p class="text-sm text-secondary">${content.reply.text}</p>` : ''}
+                  ${content.reply.content?.map(c => {
+                    if (typeof c === 'object' && c.image) {
+                      return `<img src="${c.image}" class="rounded-xl border mb-2 cursor-pointer lightbox-trigger" style="max-width:100%;max-height:200px" title="Click to enlarge">`;
+                    } else if (typeof c === 'string') {
+                      return `<div class="whitespace-pre-wrap text-sm text-secondary">${c}</div>`;
+                    }
+                    return '';
+                  }).join('') || ''}
+                </div>
+              ` : ''}
             </div>
           </div>
+        </div>
+      `;
+    }
+
+    function renderLightbox() {
+      return `
+        <div id="lightbox-backdrop" class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center animate-fade" style="cursor:zoom-out">
+          <button id="lightbox-close" class="absolute top-4 right-4 text-white p-2 hover:bg-white/20 rounded-full" style="z-index:51">
+            <svg style="width:2rem;height:2rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+          <img src="${state.lightboxImage}" class="max-w-full max-h-full object-contain p-4" style="cursor:default">
         </div>
       `;
     }
@@ -2585,6 +2695,14 @@
         state.filters.myClaimsOnly = e.target.checked;
         render();
       });
+      document.getElementById('filter-awaiting')?.addEventListener('change', (e) => {
+        state.filters.awaitingAnswer = e.target.checked;
+        render();
+      });
+      document.getElementById('filter-answered')?.addEventListener('change', (e) => {
+        state.filters.hasNewAnswer = e.target.checked;
+        render();
+      });
 
       document.querySelectorAll('[data-folder]').forEach(tab => {
         tab.addEventListener('click', () => { state.currentFolder = tab.dataset.folder; state.selectedThread = null; render(); });
@@ -2606,6 +2724,15 @@
 
     function bindDetailEvents() {
       document.getElementById('back')?.addEventListener('click', () => { state.selectedThread = null; render(); });
+
+      // Lightbox triggers for images
+      document.querySelectorAll('.lightbox-trigger').forEach(img => {
+        img.addEventListener('click', () => {
+          state.lightboxImage = img.src;
+          render();
+        });
+      });
+
       document.getElementById('action-claim')?.addEventListener('click', () => handleAction('claim'));
       document.getElementById('action-decline')?.addEventListener('click', () => handleAction('decline'));
       document.getElementById('action-complete')?.addEventListener('click', () => handleAction('complete'));
@@ -2813,6 +2940,23 @@
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function bindLightboxEvents() {
+      document.getElementById('lightbox-backdrop')?.addEventListener('click', (e) => {
+        if (e.target.id === 'lightbox-backdrop') { state.lightboxImage = null; render(); }
+      });
+      document.getElementById('lightbox-close')?.addEventListener('click', () => {
+        state.lightboxImage = null; render();
+      });
+      // Close on Escape key
+      document.addEventListener('keydown', function lightboxEsc(e) {
+        if (e.key === 'Escape' && state.lightboxImage) {
+          state.lightboxImage = null;
+          render();
+          document.removeEventListener('keydown', lightboxEsc);
+        }
+      });
     }
 
     function bindNewRequestEvents() {
