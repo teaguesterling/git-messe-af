@@ -502,7 +502,7 @@
         return await this.request(`/contents/${path}`, { method: 'DELETE', body: JSON.stringify({ message, sha }) });
       }
 
-      // Get directory contents (v2 format)
+      // Get directory contents (v2 format) - uses Contents API
       async getDirectory(dirPath) {
         try {
           const data = await this.request(`/contents/${dirPath}`);
@@ -511,6 +511,35 @@
         } catch (e) {
           if (e.message.includes('404')) return null;
           throw e;
+        }
+      }
+
+      // Get files in a directory from a specific git tree (more reliable than Contents API)
+      async getFilesFromTree(treeSha, dirPath) {
+        console.log('[GitHub] getFilesFromTree called:', { treeSha, dirPath });
+        try {
+          // Get the full tree recursively
+          const tree = await this.request(`/git/trees/${treeSha}?recursive=1`);
+          console.log('[GitHub] Tree API returned:', tree.tree?.length || 0, 'entries, truncated:', tree.truncated);
+
+          // Filter to files in the specified directory
+          const prefix = dirPath + '/';
+          const files = tree.tree.filter(item =>
+            item.type === 'blob' && item.path.startsWith(prefix)
+          );
+
+          // Debug: show what we found
+          if (files.length === 0) {
+            const exchangePaths = tree.tree.filter(t => t.path.startsWith('exchange/')).map(t => t.path);
+            console.log('[GitHub] Looking for prefix:', prefix);
+            console.log('[GitHub] Exchange paths in tree:', exchangePaths);
+          } else {
+            console.log('[GitHub] Found', files.length, 'files for prefix:', prefix);
+          }
+          return files.map(f => ({ name: f.path.substring(prefix.length), path: f.path, sha: f.sha }));
+        } catch (e) {
+          console.error('[GitHub] getFilesFromTree error:', e);
+          return [];
         }
       }
 
@@ -965,25 +994,29 @@
 
             const treeEntries = [];
 
+            // Calculate old directory path for v2 format (from oldFolder, not thread._path which may be stale)
+            const oldDirPath = `exchange/state=${oldFolder}/${envelope.ref}`;
+
             // Handle v1 format - delete old file
             if (thread._format === 'v1') {
               treeEntries.push({ path: thread._path, mode: '100644', type: 'blob', sha: null });
             }
             // Handle v2 format with move - delete old files
+            // Use getFilesFromTree to get files from the actual base tree (not Contents API which can be stale)
             else if (needsMove) {
-              const oldFiles = await this.getDirectory(thread._path);
-              console.log('[GitHub] getDirectory for move:', thread._path, oldFiles ? `${oldFiles.length} files` : 'null');
-              if (oldFiles) {
+              const oldFiles = await this.getFilesFromTree(baseTreeSha, oldDirPath);
+              console.log('[GitHub] getFilesFromTree for move:', oldDirPath, `${oldFiles.length} files`);
+              if (oldFiles.length > 0) {
                 for (const file of oldFiles) {
                   treeEntries.push({
-                    path: `${thread._path}/${file.name}`,
+                    path: file.path,
                     mode: '100644',
                     type: 'blob',
                     sha: null
                   });
                 }
               } else {
-                console.warn('[GitHub] WARNING: getDirectory returned null, old files will not be deleted!');
+                console.warn('[GitHub] WARNING: No files found in tree for path:', oldDirPath);
               }
             }
 
@@ -1002,7 +1035,7 @@
             console.log('[GitHub] updateThread:', {
               format: thread._format,
               needsMove,
-              oldPath: thread._path,
+              oldDirPath,
               destPath,
               deletes: treeEntries.filter(e => e.sha === null).map(e => e.path),
               creates: treeEntries.filter(e => e.content).map(e => e.path)
@@ -1029,9 +1062,12 @@
 
             return envelope;
           } catch (e) {
-            const isConflict = e.message.includes('fast forward') || e.message.includes('422');
+            // Retry on conflicts: fast-forward errors, 422 status, or BadObjectState (stale tree)
+            const isConflict = e.message.includes('fast forward') ||
+                               e.message.includes('422') ||
+                               e.message.includes('BadObjectState');
             if (isConflict && attempt < retries) {
-              console.log(`[GitHub] Retry ${attempt}/${retries} after conflict...`);
+              console.log(`[GitHub] Retry ${attempt}/${retries} after conflict: ${e.message}`);
               await new Promise(r => setTimeout(r, 500 * attempt));
               continue;
             }
@@ -2426,12 +2462,14 @@
         state.threads[oldFolder].splice(oldIndex, 1);
       }
 
-      // Update thread properties
+      // Update thread properties including _path for the new location
+      const newPath = `exchange/state=${newFolder}/${thread.ref}`;
       const updatedThread = {
         ...thread,
         status: newStatus,
         updated: new Date().toISOString(),
-        executor: newStatus === 'claimed' ? state.config.executorId : thread.executor
+        executor: newStatus === 'claimed' ? state.config.executorId : thread.executor,
+        _path: newPath  // Critical: update path so subsequent operations use correct location
       };
       if (updatedThread.envelope) {
         updatedThread.envelope = { ...updatedThread.envelope, status: newStatus, updated: updatedThread.updated };

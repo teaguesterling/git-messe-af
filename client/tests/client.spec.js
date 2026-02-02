@@ -348,6 +348,176 @@ test.describe('Thread Actions', () => {
     expect(claimCalled).toBe(true);
   });
 
+  test('claim uses correct old path when deleting files during move', async ({ page }) => {
+    // This test verifies that when claiming a thread (moving from received to executing),
+    // the delete entries in the tree commit use the OLD path (state=received), not the
+    // new path that might have been set by optimistic UI updates.
+    let treeRequest = null;
+    const testRef = '2026-02-01-001';
+
+    // Create a v2 format mock thread (directory-based)
+    const v2Thread = {
+      ...mockThread,
+      ref: testRef,
+      _format: 'v2',
+      _path: `exchange/state=received/${testRef}`
+    };
+
+    await setupGitHubMocks(page, {
+      threads: [v2Thread],
+      folders: {
+        received: [v2Thread],
+        executing: [],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    // Mock the recursive tree GET endpoint - this is called by getFilesFromTree
+    // to find files to delete when moving a thread
+    await page.route('https://api.github.com/repos/**/git/trees/*', async (route, request) => {
+      const url = request.url();
+      if (url.includes('recursive=1')) {
+        // Return a tree that includes the file in the RECEIVED folder
+        return route.fulfill({
+          json: {
+            sha: 'current-tree-sha',
+            truncated: false,
+            tree: [
+              {
+                path: `exchange/state=received/${testRef}/000-${testRef}.messe-af.yaml`,
+                mode: '100644',
+                type: 'blob',
+                sha: 'file-sha-123'
+              }
+            ]
+          }
+        });
+      }
+      return route.fallback();
+    });
+
+    // Override git/trees POST to capture the request body
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
+        treeRequest = JSON.parse(request.postData());
+        return route.fulfill({ json: { sha: 'new-tree-sha' } });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+    await expect(page.locator('text=Inbox')).toBeVisible({ timeout: 5000 });
+
+    // Open detail view and claim
+    await page.click('.thread-row');
+    await expect(page.locator('text=Claim This Request')).toBeVisible();
+    await page.click('text=Claim This Request');
+
+    // Wait for the API call to complete
+    await page.waitForTimeout(1000);
+
+    // Verify the tree request was made
+    expect(treeRequest).not.toBeNull();
+    expect(treeRequest.tree).toBeDefined();
+
+    // Find the delete entry (sha: null means delete)
+    const deleteEntry = treeRequest.tree.find(t => t.sha === null);
+    expect(deleteEntry).toBeDefined();
+
+    // CRITICAL: The delete path should be the OLD location (state=received),
+    // NOT the new location (state=executing)
+    expect(deleteEntry.path).toContain('state=received');
+    expect(deleteEntry.path).not.toContain('state=executing');
+    // Path format may be v1 (flat file) or v2 (directory) depending on how thread was loaded
+    expect(deleteEntry.path).toMatch(/exchange\/state=received\/.*\.messe-af\.yaml/);
+  });
+
+  test('complete uses correct old path when deleting files during move', async ({ page }) => {
+    // This test verifies that when completing a thread (moving from executing to finished),
+    // the delete entries use the OLD path (state=executing), not any stale path.
+    let treeRequest = null;
+    const testRef = '2026-02-01-001';
+
+    // Use the mockClaimedThread which is already in executing state
+    await setupGitHubMocks(page, {
+      threads: [],
+      folders: {
+        received: [],
+        executing: [mockClaimedThread],
+        finished: [],
+        canceled: []
+      }
+    });
+
+    // Mock the recursive tree GET endpoint
+    await page.route('https://api.github.com/repos/**/git/trees/*', async (route, request) => {
+      const url = request.url();
+      if (url.includes('recursive=1')) {
+        // Return a tree that includes the file in the EXECUTING folder
+        return route.fulfill({
+          json: {
+            sha: 'current-tree-sha',
+            truncated: false,
+            tree: [
+              {
+                path: `exchange/state=executing/${testRef}/000-${testRef}.messe-af.yaml`,
+                mode: '100644',
+                type: 'blob',
+                sha: 'file-sha-456'
+              }
+            ]
+          }
+        });
+      }
+      return route.fallback();
+    });
+
+    // Override git/trees POST to capture the request body
+    await page.route('https://api.github.com/repos/**/git/trees', async (route, request) => {
+      if (request.method() === 'POST') {
+        treeRequest = JSON.parse(request.postData());
+        return route.fulfill({ json: { sha: 'new-tree-sha' } });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/index.html');
+    await setupConfig(page);
+    await page.reload();
+
+    // Switch to Active tab
+    await page.click('button:has-text("Active")');
+    await expect(page.locator('text=Check if the garage door is closed')).toBeVisible({ timeout: 5000 });
+
+    // Open detail view
+    await page.click('.thread-row');
+    await expect(page.locator('text=Complete')).toBeVisible();
+
+    // Fill in response and complete
+    await page.fill('#response-text', 'Task completed successfully');
+    await page.click('text=Complete');
+
+    // Wait for the API call to complete
+    await page.waitForTimeout(1000);
+
+    // Verify the tree request was made
+    expect(treeRequest).not.toBeNull();
+    expect(treeRequest.tree).toBeDefined();
+
+    // Find the delete entry (sha: null means delete)
+    const deleteEntry = treeRequest.tree.find(t => t.sha === null);
+    expect(deleteEntry).toBeDefined();
+
+    // CRITICAL: The delete path should be the OLD location (state=executing),
+    // NOT state=received (stale) or state=finished (destination)
+    expect(deleteEntry.path).toContain('state=executing');
+    expect(deleteEntry.path).not.toContain('state=received');
+    expect(deleteEntry.path).not.toContain('state=finished');
+  });
+
   test('shows response form after claiming', async ({ page }) => {
     // Set up with a claimed thread
     await setupGitHubMocks(page, {
