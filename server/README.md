@@ -199,3 +199,81 @@ Configure on executor registration:
   }
 }
 ```
+
+## Hooks
+
+Hooks are triggered on lifecycle events and can integrate with external services.
+
+### Supported Hook Types
+
+| Type | Description |
+|------|-------------|
+| `webhook` | Generic HTTP webhook |
+| `ifttt` | IFTTT Webhooks (for Google Keep, iOS Reminders, etc.) |
+| `zapier` | Zapier webhooks |
+| `home_assistant` | Home Assistant webhooks |
+| `todoist` | Todoist task creation |
+| `linear` | Linear issue creation |
+| `google_tasks` | Google Tasks via OAuth |
+
+### Hook Events
+
+| Event | When Triggered |
+|-------|----------------|
+| `on_request_created` | New request is submitted |
+| `on_request_claimed` | Request is claimed by executor |
+| `on_request_started` | Executor marks as in-progress |
+| `on_request_completed` | Request is completed |
+| `on_request_rejected` | Request is rejected |
+| `on_request_cancelled` | Request is cancelled |
+
+### Google Tasks Hook
+
+Creates tasks in Google Tasks when requests are created, and optionally marks them complete.
+
+```json
+{
+  "hooks": {
+    "on_request_created": [{
+      "type": "google_tasks",
+      "client_id": "xxx.apps.googleusercontent.com",
+      "client_secret": "xxx",
+      "refresh_token": "xxx",
+      "tasklist": "@default",
+      "title": "MESS: {{intent}}",
+      "notes": "Ref: {{ref}}\nPriority: {{priority}}"
+    }],
+    "on_request_completed": [{
+      "type": "google_tasks",
+      "client_id": "xxx.apps.googleusercontent.com",
+      "client_secret": "xxx",
+      "refresh_token": "xxx",
+      "action": "complete",
+      "task_id": "{{external_id}}"
+    }]
+  }
+}
+```
+
+**Setup:**
+1. Create a Google Cloud project at https://console.cloud.google.com
+2. Enable the **Google Tasks API**
+3. Create OAuth 2.0 credentials (choose "Desktop app" type)
+4. Use [OAuth Playground](https://developers.google.com/oauthplayground/) to get a refresh token:
+   - Add `https://www.googleapis.com/auth/tasks` scope
+   - Exchange authorization code for tokens
+   - Copy the `refresh_token`
+
+### Template Variables
+
+Available in hook configurations:
+
+| Variable | Description |
+|----------|-------------|
+| `{{ref}}` | Thread reference |
+| `{{intent}}` | Request intent |
+| `{{status}}` | Current status |
+| `{{priority}}` | Priority level |
+| `{{requestor_id}}` | Requestor ID |
+| `{{executor_id}}` | Assigned executor ID |
+| `{{event}}` | Event type (created, claimed, etc.) |
