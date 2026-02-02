@@ -41,6 +41,9 @@ jobs:
           SENDGRID_FROM_EMAIL: ${{ secrets.SENDGRID_FROM_EMAIL }}
           GMAIL_EMAIL: ${{ secrets.GMAIL_EMAIL }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GOOGLE_TASKS_CLIENT_ID: ${{ secrets.GOOGLE_TASKS_CLIENT_ID }}
+          GOOGLE_TASKS_CLIENT_SECRET: ${{ secrets.GOOGLE_TASKS_CLIENT_SECRET }}
+          GOOGLE_TASKS_REFRESH_TOKEN: ${{ secrets.GOOGLE_TASKS_REFRESH_TOKEN }}
           GITHUB_REPO: ${{ github.repository }}
           # Client URL - defaults to template's hosted client, set CLIENT_URL secret to use your own
           CLIENT_URL: ${{ secrets.CLIENT_URL }}
@@ -436,6 +439,80 @@ jobs:
             console.log(`  ✓ Gmail sent to ${to}`);
           }
 
+          async function sendGoogleTasks(config, payload) {
+            const clientId = process.env.GOOGLE_TASKS_CLIENT_ID;
+            const clientSecret = process.env.GOOGLE_TASKS_CLIENT_SECRET;
+            const refreshToken = process.env.GOOGLE_TASKS_REFRESH_TOKEN;
+
+            if (!clientId || !clientSecret || !refreshToken) {
+              console.log(`  ⚠ Google Tasks: Missing credentials (GOOGLE_TASKS_CLIENT_ID, GOOGLE_TASKS_CLIENT_SECRET, or GOOGLE_TASKS_REFRESH_TOKEN)`);
+              return;
+            }
+
+            // Exchange refresh token for access token
+            const tokenParams = new URLSearchParams({
+              client_id: clientId,
+              client_secret: clientSecret,
+              refresh_token: refreshToken,
+              grant_type: 'refresh_token'
+            });
+
+            let accessToken;
+            try {
+              const tokenResponse = await httpRequest('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                hostname: 'oauth2.googleapis.com',
+                path: '/token',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+              }, tokenParams.toString());
+
+              const tokenData = JSON.parse(tokenResponse.data);
+              accessToken = tokenData.access_token;
+            } catch (e) {
+              console.log(`  ✗ Google Tasks: Failed to get access token: ${e.message}`);
+              return;
+            }
+
+            // Build task notes with request details
+            const notes = [
+              `Priority: ${payload.priority}`,
+              `From: ${payload.requestor}`,
+              `Ref: ${payload.ref}`,
+              payload.wants_photo ? '📷 Photo requested' : '',
+              payload.context?.length ? `\nContext:\n${payload.context.map(c => `• ${c}`).join('\n')}` : '',
+              '',
+              `View: ${payload.url}`
+            ].filter(Boolean).join('\n');
+
+            // Create task
+            const listId = config.list_id || '@default';
+            const task = {
+              title: `[MESS] ${payload.intent}`,
+              notes: notes,
+              status: 'needsAction'
+            };
+
+            // Set due date if urgent (today)
+            if (payload.priority === 'urgent' || payload.priority === 'elevated') {
+              const today = new Date().toISOString().split('T')[0];
+              task.due = `${today}T00:00:00.000Z`;
+            }
+
+            const apiUrl = `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`;
+
+            await httpRequest(apiUrl, {
+              method: 'POST',
+              hostname: 'tasks.googleapis.com',
+              path: `/tasks/v1/lists/${encodeURIComponent(listId)}/tasks`,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`
+              }
+            }, JSON.stringify(task));
+
+            console.log(`  ✓ Google Tasks: task created in list ${listId}`);
+          }
+
           // ============ Main Logic ============
 
           async function main() {
@@ -585,6 +662,9 @@ jobs:
                           break;
                         case 'google_chat':
                           await sendGoogleChat(notif, payload);
+                          break;
+                        case 'google_tasks':
+                          await sendGoogleTasks(notif, payload);
                           break;
                         case 'pushover':
                           await sendPushover(notif, payload);

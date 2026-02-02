@@ -49,4 +49,5 @@ nav:
     - MESSE-AF Format: messe-af-v1.md
   - Guides:
     - Deployment Guide: mess-deployment-guide.md
+    - Notification Setup: notification-setup.md
     - Implementation Plan: mess-implementation-plan.md

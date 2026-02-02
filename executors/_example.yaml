@@ -12,15 +12,21 @@ capabilities:
 
 notifications:
   # Uncomment and configure the channels you want
-  
+
   # - type: ntfy
   #   topic: my-secret-topic
-  
+
   # - type: email
   #   address: me@example.com
-  
+
   # - type: slack
   #   webhook_url: https://hooks.slack.com/services/xxx
+
+  # - type: google_tasks
+  #   list_id: "@default"  # Optional: defaults to primary list
+
+  # - type: google_chat
+  #   webhook_url: https://chat.googleapis.com/v1/spaces/xxx/messages?key=xxx&token=xxx
 
 preferences:
   min_priority: normal
