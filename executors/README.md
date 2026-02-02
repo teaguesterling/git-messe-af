@@ -19,29 +19,29 @@ display_name: "Teague's Phone"
 
 # Capabilities this executor can handle
 # Requests are routed to executors with matching capabilities
+# Use capability IDs defined in the exchange's capabilities/ directory
 capabilities:
+  # Visual tasks
+  - take-photo             # Capture and attach photos
+  - check-visual           # Look at something, read a display
+
   # Physical tasks
-  - check:visual           # Look at something, read a display
-  - check:physical         # Touch, open, measure
-  - fetch:indoor           # Get something from another room
-  - fetch:outdoor          # Pick up packages, check mailbox
-  - operate:appliance      # Thermostat, washer, coffee maker
-  - operate:vehicle        # Drive, check car status
-  
+  - check-physical         # Touch, open, measure
+  - fetch-indoor           # Get something from another room
+  - fetch-outdoor          # Pick up packages, check mailbox
+  - operate-appliance      # Thermostat, washer, coffee maker
+
   # Communication
-  - call:phone             # Make or receive calls
-  - message:text           # Send SMS/texts
-  - interact:person        # Talk to delivery, neighbors
-  
-  # Information
-  - photo:capture          # Take and send photos
-  - read:document          # Physical mail, papers
-  - research:local         # Check store hours, availability
-  
-  # Care tasks
-  - care:plant             # Water, prune, check plants
-  - care:pet               # Feed, walk, check on pets
-  - care:child             # Check on, assist children
+  - make-phone-call        # Make or receive calls
+  - send-text-message      # Send SMS/texts
+  - in-person-interaction  # Talk to delivery, neighbors
+
+  # Access (location-specific)
+  - home-access            # General home access
+  - local-errands          # Can run errands locally
+
+  # With optional metadata (exchange-specific)
+  - take-photo: { camera: rear, max-resolution: 4k }
 
 # How to notify this executor of new requests
 notifications:
@@ -112,8 +112,8 @@ preferences:
 executor_id: kitchen-tablet
 display_name: "Kitchen Tablet"
 capabilities:
-  - check:visual
-  - photo:capture
+  - check-visual
+  - take-photo
 notifications:
   - type: ntfy
     topic: kitchen-mess-alerts

@@ -212,12 +212,8 @@ MESS:
       
       # === OPTIONAL: Capabilities ===
       requires:
-        - <capability>
-        - <capability>: <level>     # basic | advanced | precision
-        - <capability>:
-            level: precision
-            variants: [specific, types]
-            constraint: "location or other constraint"
+        - <capability-id>                    # Simple capability ID
+        - <capability-id>: <metadata>        # With exchange-specific metadata
       
       # === OPTIONAL: Context (MIME-like) ===
       context:
@@ -277,9 +273,8 @@ MESS:
       intent: vacuum the rice spill in front of the kitchen sink
       precision: exact
       requires:
-        - cleaning: { variants: [vacuum] }
-        - mobility
-        - access: { constraint: "home/kitchen" }
+        - vacuum-floor
+        - home-kitchen-access
       response_hint:
         - confirmation
 ```
@@ -291,8 +286,8 @@ MESS:
       intent: print 4 of these cable clips and assemble per instructions
       precision: exact
       requires:
-        - fabricator: { variants: [3d_printer_fdm] }
-        - manipulator
+        - 3d-print-fdm
+        - assembly
       context:
         - Need these for desk cable management
         - file:
@@ -328,8 +323,8 @@ MESS:
       id: dice-onions
       intent: dice the onions, medium dice
       requires:
-        - manipulator: precision
-        - access: { constraint: kitchen }
+        - precision-knife-work
+        - home-kitchen-access
       constraints:
         depends_on: [deliver-onions]
 ```
@@ -774,45 +769,57 @@ MESS:
 
 ## 8. Capabilities
 
-### 8.1 Standard Capabilities
+Capabilities are **exchange-level** definitions describing what actions the exchange can delegate to its executors. Executors claim capabilities; requests require them.
+
+### 8.1 Capability Format
+
+A capability is a simple identifier with optional metadata:
 
 ```yaml
-# Sensing
-visual_sensor:    [camera, depth, thermal, microscope]
-audio_sensor:     [microphone, directional]
-environmental:    [temperature, humidity, air_quality, light]
-
-# Mobility
-mobility:         [walking, wheeled, flying, swimming]
-
-# Manipulation
-manipulator:      [gripper, precision_arm, humanoid_hand]
-
-# Fabrication  
-fabricator:       [3d_printer_fdm, 3d_printer_resin, cnc, laser]
-
-# Maintenance
-cleaning:         [vacuum, mop, scrub, dust]
-
-# Output
-voice:            [speaker, phone]
-display:          [screen, projector]
-
-# Cognitive
-judgment:         [aesthetic, safety, quality_control]
-language:         [english, spanish, mandarin, ...]
-
-# Access
-access:           # Always has constraint for location
+id: take-photo
+description: Capture and attach photos
+tags: [visual, attachments]
 ```
 
-### 8.2 Capability Levels
+**ID conventions** (recommended, not enforced):
+- Use `kebab-case` for readability
+- Be specific: `vacuum-floor` not just `cleaning`
+- Create distinct IDs for skill levels: `woodworking`, `expert-woodworking`
+- Create distinct IDs for variants: `3d-print-fdm`, `3d-print-resin`
 
-- `basic` — Can do the thing
-- `advanced` — Does it well
-- `precision` — High accuracy/fine control
+### 8.2 Exchange Capability Catalog
 
-### 8.3 Executor Registration Example
+Exchanges maintain a catalog of known capabilities. This is informational—it helps with discovery and documentation but doesn't restrict what capabilities can be used.
+
+```yaml
+# Example capability definitions (exchange-specific)
+---
+id: take-photo
+description: Capture and attach photos
+tags: [visual, attachments]
+---
+id: check-visual
+description: Look at something, read a display
+tags: [visual, inspection]
+---
+id: vacuum-floor
+description: Vacuum floors and carpets
+tags: [cleaning, maintenance]
+---
+id: precision-manipulation
+description: Fine motor control for delicate tasks
+tags: [physical, dexterity]
+---
+id: home-kitchen-access
+description: Physical access to the kitchen
+tags: [access, home]
+```
+
+**Open capability creation:** Some exchanges (like GitHub-based implementations) allow executors and requestors to freely define new capabilities by adding to the catalog. Others may have a fixed set.
+
+### 8.3 Executors Claim Capabilities
+
+Executors register which capabilities they can handle:
 
 ```yaml
 MESS:
@@ -821,24 +828,88 @@ MESS:
         id: roomba-kitchen
         name: Kitchen Roomba
         capabilities:
-          - cleaning: { variants: [vacuum], level: basic }
-          - mobility: { variants: [wheeled] }
-          - access: { constraint: "home/kitchen, home/living_room" }
+          - vacuum-floor
+          - home-kitchen-access
+          - home-living-room-access
         availability: always
-        
+
   - config:
       executor:
         id: teague-phone
         name: Teague's Phone
         capabilities:
-          - visual_sensor: { variants: [camera] }
-          - audio_sensor
-          - mobility: { variants: [walking], range: local }
-          - access: { constraint: "home/*, san_anselmo/*" }
-          - judgment: [aesthetic, safety]
-          - language: [english]
+          - take-photo
+          - check-visual
+          - make-phone-call
+          - home-access
+          - local-errands
         availability: schedule
         schedule: "0 8-22 * * *"   # 8am-10pm
+```
+
+### 8.4 Requests Require Capabilities
+
+Requests can specify required capabilities for routing:
+
+```yaml
+MESS:
+  - request:
+      intent: vacuum the rice spill in front of the kitchen sink
+      requires:
+        - vacuum-floor
+        - home-kitchen-access
+```
+
+When `requires` is specified, the exchange routes only to executors claiming all listed capabilities. If omitted, all executors are eligible.
+
+### 8.5 Capability Metadata (Exchange-Specific)
+
+Both requests and executor registrations may include metadata on capabilities. The protocol does not define specific metadata fields—interpretation is left to each exchange:
+
+```yaml
+# Request with metadata hints
+requires:
+  - fabricator: { variant: fdm, material: pla }
+  - precision-manipulation: { level: expert }
+
+# Executor registration with metadata
+capabilities:
+  - vacuum-floor: { areas: [kitchen, living-room] }
+  - take-photo: { camera: rear, max-resolution: 4k }
+```
+
+Exchanges may use metadata for:
+- More precise routing
+- Capability matching constraints
+- Informational display
+- Custom filtering logic
+
+Executors and requestors should gracefully handle unknown metadata fields.
+
+### 8.6 Capability Discovery
+
+Agents can discover available capabilities via query:
+
+```yaml
+MESS:
+  - query:
+      type: capabilities
+      filter:
+        tags: [visual]
+```
+
+Response:
+```yaml
+MESS:
+  - response:
+      re: last
+      content:
+        - structured:
+            capabilities:
+              - id: take-photo
+                description: Capture and attach photos
+              - id: check-visual
+                description: Look at something, read a display
 ```
 
 ---
@@ -991,8 +1062,8 @@ MESS:
         - ref: dinner-check
         - Making stir fry with the chicken
       requires:
-        - manipulator
-        - access: { constraint: kitchen }
+        - operate-appliance
+        - home-kitchen-access
 ---
 # Executor needs confirmation
 MESS:
