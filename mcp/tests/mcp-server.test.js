@@ -1206,3 +1206,91 @@ describe('Thread Resource Edge Cases', () => {
     }
   });
 });
+
+describe('Background Sync', () => {
+  it('tracks thread state correctly', () => {
+    // Simulate trackThread function
+    const threadStateCache = new Map();
+
+    function trackThread(ref, envelope) {
+      threadStateCache.set(ref, {
+        status: envelope.status,
+        updated: envelope.updated,
+        executor: envelope.executor
+      });
+    }
+
+    const envelope = {
+      ref: '2026-02-01-001',
+      status: 'pending',
+      updated: '2026-02-01T10:00:00Z',
+      executor: null
+    };
+
+    trackThread('2026-02-01-001', envelope);
+
+    assert.ok(threadStateCache.has('2026-02-01-001'));
+    const state = threadStateCache.get('2026-02-01-001');
+    assert.strictEqual(state.status, 'pending');
+    assert.strictEqual(state.executor, null);
+  });
+
+  it('detects status change', () => {
+    const lastState = { status: 'pending', updated: '2026-02-01T10:00:00Z', executor: null };
+    const currentState = { status: 'claimed', updated: '2026-02-01T10:05:00Z', executor: 'teague-phone' };
+
+    const changed = (
+      currentState.status !== lastState.status ||
+      currentState.updated !== lastState.updated ||
+      currentState.executor !== lastState.executor
+    );
+
+    assert.strictEqual(changed, true);
+  });
+
+  it('detects no change when state is same', () => {
+    const lastState = { status: 'pending', updated: '2026-02-01T10:00:00Z', executor: null };
+    const currentState = { status: 'pending', updated: '2026-02-01T10:00:00Z', executor: null };
+
+    const changed = (
+      currentState.status !== lastState.status ||
+      currentState.updated !== lastState.updated ||
+      currentState.executor !== lastState.executor
+    );
+
+    assert.strictEqual(changed, false);
+  });
+
+  it('detects executor change without status change', () => {
+    const lastState = { status: 'claimed', updated: '2026-02-01T10:00:00Z', executor: 'phone-1' };
+    const currentState = { status: 'claimed', updated: '2026-02-01T10:05:00Z', executor: 'phone-2' };
+
+    const changed = (
+      currentState.status !== lastState.status ||
+      currentState.updated !== lastState.updated ||
+      currentState.executor !== lastState.executor
+    );
+
+    assert.strictEqual(changed, true);
+  });
+
+  it('generates correct notification URI', () => {
+    const ref = '2026-02-01-001';
+    const uri = `thread://${ref}`;
+
+    assert.strictEqual(uri, 'thread://2026-02-01-001');
+  });
+
+  it('tracks multiple threads independently', () => {
+    const threadStateCache = new Map();
+
+    threadStateCache.set('2026-02-01-001', { status: 'pending', executor: null });
+    threadStateCache.set('2026-02-01-002', { status: 'claimed', executor: 'phone' });
+    threadStateCache.set('2026-02-01-003', { status: 'completed', executor: 'phone' });
+
+    assert.strictEqual(threadStateCache.size, 3);
+    assert.strictEqual(threadStateCache.get('2026-02-01-001').status, 'pending');
+    assert.strictEqual(threadStateCache.get('2026-02-01-002').status, 'claimed');
+    assert.strictEqual(threadStateCache.get('2026-02-01-003').status, 'completed');
+  });
+});

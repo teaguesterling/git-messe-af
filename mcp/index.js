@@ -59,6 +59,13 @@ const CACHE_DIR = process.env.MESS_CACHE_DIR || path.join(os.tmpdir(), 'mess-att
 // In-memory registry of cached resources (thread -> attachments)
 const resourceRegistry = new Map();
 
+// Background sync configuration
+const SYNC_ENABLED = process.env.MESS_SYNC_ENABLED !== 'false'; // enabled by default
+const SYNC_INTERVAL = parseInt(process.env.MESS_SYNC_INTERVAL || '30000', 10); // 30 seconds default
+
+// Thread state tracking for change detection
+const threadStateCache = new Map(); // ref -> { status, updated, executor }
+
 /**
  * Cache an attachment and register it as a resource
  * @param {string} ref - Thread reference
@@ -765,6 +772,9 @@ async function createRequest(from, request) {
     await github.createDirectory(ghDirPath, files, `${ref}: New request`);
   }
 
+  // Track for change notifications
+  trackThread(ref, envelope);
+
   return { ref, status: 'pending', message: `Request created: ${ref}` };
 }
 
@@ -1272,6 +1282,84 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+// ============ Background Sync ============
+
+/**
+ * Check for changes to tracked threads and send notifications
+ */
+async function checkForChanges() {
+  if (threadStateCache.size === 0) return;
+
+  for (const [ref, lastState] of threadStateCache.entries()) {
+    try {
+      const thread = await findThread(ref);
+      if (!thread) continue;
+
+      const currentState = {
+        status: thread.envelope.status,
+        updated: thread.envelope.updated,
+        executor: thread.envelope.executor
+      };
+
+      // Check if state changed
+      const changed = (
+        currentState.status !== lastState.status ||
+        currentState.updated !== lastState.updated ||
+        currentState.executor !== lastState.executor
+      );
+
+      if (changed) {
+        // Update cache
+        threadStateCache.set(ref, currentState);
+
+        // Send notification
+        try {
+          await server.sendResourceUpdated({ uri: `thread://${ref}` });
+          console.error(`[sync] Thread ${ref} changed: ${lastState.status} → ${currentState.status}`);
+        } catch (e) {
+          // Notification failed, client may not support it
+          console.error(`[sync] Failed to notify for ${ref}: ${e.message}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[sync] Error checking ${ref}: ${e.message}`);
+    }
+  }
+}
+
+/**
+ * Start the background sync loop
+ */
+function startSyncLoop() {
+  if (!SYNC_ENABLED) {
+    console.error(`  Sync: disabled`);
+    return;
+  }
+
+  console.error(`  Sync: every ${SYNC_INTERVAL / 1000}s`);
+
+  setInterval(async () => {
+    try {
+      await checkForChanges();
+    } catch (e) {
+      console.error(`[sync] Error: ${e.message}`);
+    }
+  }, SYNC_INTERVAL);
+}
+
+/**
+ * Track a thread for change notifications
+ * @param {string} ref - Thread reference
+ * @param {Object} envelope - Thread envelope
+ */
+function trackThread(ref, envelope) {
+  threadStateCache.set(ref, {
+    status: envelope.status,
+    updated: envelope.updated,
+    executor: envelope.executor
+  });
+}
+
 // Start
 const transport = new StdioServerTransport();
 await server.connect(transport);
@@ -1279,3 +1367,6 @@ console.error(`MESS MCP Server v2.1 started`);
 console.error(`  Local: ${GITHUB_ONLY ? 'disabled' : MESS_DIR}`);
 console.error(`  GitHub: ${github ? GITHUB_REPO : 'disabled'}`);
 console.error(`  Cache: ${CACHE_DIR}`);
+
+// Start background sync
+startSyncLoop();
