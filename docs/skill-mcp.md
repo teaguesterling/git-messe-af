@@ -199,3 +199,14 @@ thread://{ref}/latest   # Most recent message
 | `failed` | Could not complete |
 | `declined` | Executor declined the request |
 | `cancelled` | Request was cancelled |
+
+## Background Sync
+
+The server automatically polls for thread changes and sends MCP notifications:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MESS_SYNC_ENABLED` | `true` | Enable background sync |
+| `MESS_SYNC_INTERVAL` | `30000` | Poll interval (ms) |
+
+When a tracked thread changes state, the server sends a `resources/updated` notification for `thread://{ref}`. This enables the agent to be notified when requests are claimed, completed, or need input.

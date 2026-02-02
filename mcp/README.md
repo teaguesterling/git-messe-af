@@ -62,6 +62,8 @@ MESS_AGENT_ID=claude-desktop
 | `MESS_DIR` | No | `~/.mess` | Local directory for task files |
 | `MESS_AGENT_ID` | No | `claude-agent` | Identifier for this agent |
 | `MESS_CAPABILITIES_DIR` | No | `../capabilities` | Directory containing capability definitions |
+| `MESS_SYNC_ENABLED` | No | `true` | Enable background sync for change notifications |
+| `MESS_SYNC_INTERVAL` | No | `30000` | Sync interval in milliseconds |
 
 ## Setting up with Claude Desktop
 
@@ -305,6 +307,20 @@ thread://{ref}/latest   # Most recent message only
 # Fix permissions
 chmod -R 755 ~/.mess
 ```
+
+## Background Sync
+
+The MCP server automatically polls for changes to tracked threads and sends MCP notifications when state changes (claimed, completed, needs_input, etc.).
+
+- **Enabled by default**: Set `MESS_SYNC_ENABLED=false` to disable
+- **30-second interval**: Adjust with `MESS_SYNC_INTERVAL=60000` (in ms)
+- **Tracks agent-created threads**: Only threads you create are monitored
+- **MCP notifications**: Sends `resources/updated` for `thread://{ref}` URIs
+
+This allows Claude Desktop to be notified when:
+- A human claims your request
+- A task is completed with a response
+- The executor needs clarification (needs_input)
 
 ## Development
 
