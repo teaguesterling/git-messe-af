@@ -1,8 +1,8 @@
 # MESSE-AF: MESS Exchange Activity File
 ## Thread File Format for File-Based Exchanges
 
-**Version:** 1.0.0  
-**Date:** 2026-01-31
+**Version:** 2.1.0
+**Date:** 2026-02-01
 
 ---
 
@@ -18,50 +18,179 @@ File extension: `.messe-af.yaml` or `.messe-af`
 
 ---
 
+## Changelog
+
+### v2.1.0 (2026-02-01)
+
+**Addressable Messages & Resource URIs**
+
+- **Message-level `re:`** — The `re:` field now appears at the message document level, not inside MESS blocks. This eliminates redundant repetition.
+
+- **Deterministic message refs** — Every message (except acks) receives a ref: `{thread-ref}/{mess-type}-{serial}-{tokenized-id}`. Examples:
+  - `2026-02-01-001-fridge-check/claim-001`
+  - `2026-02-01-001-fridge-check/response-002-inventory`
+
+- **Acks are system messages** — Exchange acks don't consume serial numbers and don't receive message refs. They confirm receipt but aren't addressable content.
+
+- **`content://` resource URIs** — For MCP context, attachments use resource URIs instead of file paths:
+  ```yaml
+  image:
+    resource: content://2026-02-01-001/att-002-image-fridge.jpg
+    mime: image/jpeg
+    size: 328847
+  ```
+
+- **`size` field required** — External attachments must include size in bytes.
+
+- **Executor `id:` on responses** — Executors can optionally include `id:` on responses; the exchange assigns a `ref:` making the response addressable.
+
+### v2.0.0 (2026-02-01)
+
+- Directory-based storage for threads
+- External attachments (no inline base64 bloat)
+- Thread file overflow for long conversations
+
+### v1.0.0 (2026-01-31)
+
+- Initial specification
+- Multi-document YAML format
+- Hive-style folder partitioning
+
+---
+
 ## Identifiers
 
-### Client ID vs Exchange Ref
+### Core Identifier Fields
 
-| Field | Assigned By | Purpose |
-|-------|-------------|---------|
-| `id:` | Client (optional) | Client's reference for tracking |
-| `ref:` | Exchange (required) | Exchange's canonical identifier, used as filename |
+| Field | Meaning | Assigned By | Scope |
+|-------|---------|-------------|-------|
+| `id:` | "I call this..." | Sender (optional) | Local to sender |
+| `ref:` | "We collectively call this..." | Exchange (required) | Canonical, global |
+| `re:` | "I'm referring to..." | Sender | Points to a `ref:` |
 
-**Single request:** Client may include `id:` in the request. Exchange assigns `ref:` and returns both in the `ack`.
+### Thread References
 
-**Multiple requests in one message:** Each request can have its own `id:`. The exchange creates one MESSE-AF thread per request, each with its own `ref:`. The `ack` maps client IDs to exchange refs:
+When a client creates a request, it may include an `id:` for local tracking. The exchange assigns a canonical `ref:` that becomes the thread identifier:
 
 ```yaml
-# Client sends two requests
+# Client sends request with optional id
+from: claude-desktop
+MESS:
+  - v: 1.0.0
+  - request:
+      id: check-fridge           # Client's local identifier
+      intent: Quick fridge inventory
+
+---
+# Exchange acks with canonical ref
+from: exchange
+MESS:
+  - ack:
+      re: check-fridge
+      ref: 2026-02-01-003-check-fridge   # Thread ref (includes tokenized id)
+```
+
+The thread `ref:` format: `{date}-{serial}-{tokenized-id}`
+- Date: `YYYY-MM-DD`
+- Serial: Zero-padded sequence for that day (e.g., `003`)
+- Tokenized ID: Optional, derived from client's `id:` if provided
+
+### Message References
+
+Every message (except acks) receives a deterministic `ref:` from the exchange:
+
+```
+{thread-ref}/{mess-type}-{serial}-{tokenized-id}
+```
+
+| Component | Description |
+|-----------|-------------|
+| `thread-ref` | The parent thread's ref |
+| `mess-type` | Message type: `claim`, `status`, `response`, `question`, `answer`, `cancel`, `followup` |
+| `serial` | Three-digit sequence within thread (001, 002, ...) |
+| `tokenized-id` | Optional, from sender's `id:` if provided |
+
+**Example sequence:**
+```
+Thread created:     2026-02-01-003-check-fridge
+Executor claims:    2026-02-01-003-check-fridge/claim-001
+Executor responds:  2026-02-01-003-check-fridge/response-002
+Executor asks:      2026-02-01-003-check-fridge/question-003-include-drawers
+Client answers:     2026-02-01-003-check-fridge/answer-004-yes-veggies
+Executor responds:  2026-02-01-003-check-fridge/response-005-veggie-photo
+```
+
+### Acks Are System Messages
+
+Acks are exchange-generated confirmations. They do **not** consume serial numbers and do **not** receive message refs. They are protocol metadata, not addressable content.
+
+```yaml
+# Executor sends response with optional id
+from: teague-phone
+re: 2026-02-01-003-check-fridge
+MESS:
+  - response:
+      id: veggie-photo           # Executor's local identifier
+      content:
+        - image: ...
+
+---
+# Exchange acks (no message ref assigned to the ack itself)
+from: exchange
+MESS:
+  - ack:
+      re: veggie-photo
+      ref: 2026-02-01-003-check-fridge/response-002-veggie-photo
+```
+
+### The `re:` Field
+
+The `re:` field appears at the **message document level**, not inside MESS blocks. It indicates what thread or message this message refers to:
+
+```yaml
+# Correct: re: at message level
+from: teague-phone
+re: 2026-02-01-003-check-fridge      # Message-level reference
+MESS:
+  - status:
+      code: claimed
+  - response:
+      content:
+        - "On my way to the kitchen"
+
+# Incorrect (deprecated): re: inside each block
+MESS:
+  - status:
+      re: 2026-02-01-003-check-fridge   # Don't do this
+      code: claimed
+```
+
+**When `re:` is omitted:**
+- For the initial request: creates a new thread
+- For messages inside a MESSE-AF file: implied by file location
+
+**Multiple requests in one message:**
+```yaml
+# Client sends two requests (each gets its own thread)
+from: claude-desktop
 MESS:
   - request:
-      id: my-task-1
+      id: task-a
       intent: check the fridge
   - request:
-      id: my-task-2
+      id: task-b
       intent: water the plants
 
-# Exchange acks with mapping
+---
+# Exchange acks with mapping (creates two separate threads)
+from: exchange
 MESS:
   - ack:
       requests:
-        - id: my-task-1
-          ref: 2026-01-31-001
-        - id: my-task-2
-          ref: 2026-01-31-002
-```
-
-**Subsequent references:** Use `re:` field with either the client's `id:` or exchange's `ref:` — the exchange resolves both:
-
-```yaml
-MESS:
-  - status:
-      re: my-task-1        # Client's ID works
-      code: completed
-      
-  - status:
-      re: 2026-01-31-001   # Exchange's ref also works
-      code: completed
+        - id: task-a
+          ref: 2026-02-01-003-task-a
+        - id: task-b
+          ref: 2026-02-01-004-task-b
 ```
 
 ---
@@ -75,34 +204,37 @@ A MESSE-AF file is a **multi-document YAML file**:
 
 ```yaml
 # === DOCUMENT 1: ENVELOPE ===
-ref: 2026-01-31-001
+ref: 2026-02-01-001-fridge-check
 client_id: my-task-1              # If client provided id
 requestor: claude-agent
 executor: teague-phone
 status: completed
-created: 2026-01-31T17:00:00-08:00
-updated: 2026-01-31T17:05:00-08:00
+created: 2026-02-01T17:00:00-08:00
+updated: 2026-02-01T17:05:00-08:00
 intent: check what's in the fridge
 priority: normal
 
 history:
   - action: created
-    at: 2026-01-31T17:00:00-08:00
+    at: 2026-02-01T17:00:00-08:00
     by: claude-agent
   - action: dispatched
-    at: 2026-01-31T17:00:01-08:00
+    at: 2026-02-01T17:00:01-08:00
     by: exchange
   - action: claimed
-    at: 2026-01-31T17:00:30-08:00
+    at: 2026-02-01T17:00:30-08:00
     by: teague-phone
+    ref: 2026-02-01-001-fridge-check/claim-001
   - action: completed
-    at: 2026-01-31T17:05:00-08:00
+    at: 2026-02-01T17:05:00-08:00
     by: teague-phone
+    ref: 2026-02-01-001-fridge-check/response-002-inventory
 
 ---
 # === DOCUMENT 2: First message (agent request) ===
+# No 're:' needed - this creates the thread
 from: claude-agent
-received: 2026-01-31T17:00:00-08:00
+received: 2026-02-01T17:00:00-08:00
 channel: mcp
 
 MESS:
@@ -117,45 +249,67 @@ MESS:
         - image
 
 ---
-# === DOCUMENT 3: Exchange ack ===
+# === DOCUMENT 3: Exchange ack (no message ref, system message) ===
 from: exchange
-received: 2026-01-31T17:00:01-08:00
+received: 2026-02-01T17:00:01-08:00
 
 MESS:
   - ack:
       re: my-task-1
-      ref: 2026-01-31-001
+      ref: 2026-02-01-001-fridge-check
 
 ---
 # === DOCUMENT 4: Executor claims ===
 from: teague-phone
-received: 2026-01-31T17:00:30-08:00
+received: 2026-02-01T17:00:30-08:00
 channel: http
+re: 2026-02-01-001-fridge-check          # Message-level reference
 
 MESS:
   - status:
-      re: 2026-01-31-001
       code: claimed
 
 ---
-# === DOCUMENT 5: Executor completes with response ===
+# === DOCUMENT 5: Exchange ack for claim (no message ref) ===
+from: exchange
+received: 2026-02-01T17:00:30-08:00
+
+MESS:
+  - ack:
+      ref: 2026-02-01-001-fridge-check/claim-001
+
+---
+# === DOCUMENT 6: Executor completes with response ===
 from: teague-phone
-received: 2026-01-31T17:05:00-08:00
+received: 2026-02-01T17:05:00-08:00
 channel: http
+re: 2026-02-01-001-fridge-check          # Message-level reference
 
 MESS:
   - status:
-      re: 2026-01-31-001
       code: completed
   - response:
-      re: 2026-01-31-001
+      id: inventory                       # Executor's optional local id
       content:
-        - image: data:image/jpeg;base64,/9j/4AAQ...
+        - image:
+            file: att-002-image-fridge.jpg
+            mime: image/jpeg
+            size: 328847
         - |
           Proteins: chicken thighs (1 lb, expires tomorrow)
           Vegetables: broccoli, carrots, half onion
           Dairy: milk, cheddar, butter
       notes: chicken should be used tonight
+
+---
+# === DOCUMENT 7: Exchange ack for response (no message ref) ===
+from: exchange
+received: 2026-02-01T17:05:00-08:00
+
+MESS:
+  - ack:
+      re: inventory
+      ref: 2026-02-01-001-fridge-check/response-002-inventory
 ```
 
 ---
@@ -169,7 +323,10 @@ Each message document (after the envelope) has:
 | `from` | string | Actor ID: agent, executor, or `exchange` |
 | `received` | datetime | When exchange received/generated the message |
 | `channel` | string | Optional: `mcp`, `slack`, `http`, `telegram`, `webhook` |
+| `re` | string | Reference to thread or message this relates to (message-level) |
 | `MESS` | list | The MESS protocol message |
+
+**Note:** The `re:` field is at the message document level, NOT inside MESS blocks. This eliminates redundant repetition when a message contains multiple blocks (e.g., `status` + `response`).
 
 ### Actor Types
 
@@ -233,13 +390,14 @@ EOF
 cat >> ~/.mess/state=executing/${ref}.messe-af.yaml << 'EOF'
 ---
 from: claude-agent
-received: 2026-01-31T18:02:30-08:00
+received: 2026-02-01T18:02:30-08:00
 channel: mcp
+re: 2026-02-01-001-fridge-check
+
 MESS:
-  - reply:
-      re: 2026-01-31-001
-      answers:
-        location: both
+  - answer:
+      id: location-answer
+      value: both
 EOF
 
 # No envelope update needed — status didn't change
@@ -252,11 +410,12 @@ EOF
 cat >> ~/.mess/state=received/${ref}.messe-af.yaml << 'EOF'
 ---
 from: teague-phone
-received: 2026-01-31T17:00:30-08:00
+received: 2026-02-01T17:00:30-08:00
 channel: http
+re: 2026-02-01-001-fridge-check
+
 MESS:
   - status:
-      re: 2026-01-31-001
       code: claimed
 EOF
 
@@ -264,7 +423,7 @@ EOF
 #    - status: pending → claimed
 #    - executor: teague-phone
 #    - updated: now
-#    - history: append claimed entry
+#    - history: append claimed entry with ref
 
 # 3. Move file to new folder
 mv ~/.mess/state=received/${ref}.messe-af.yaml ~/.mess/state=executing/
@@ -321,24 +480,28 @@ cancelled       # Agent cancelled (terminal)
 
 ### History Log
 
+Each history entry records a state change. Entries for non-ack messages include the message `ref`:
+
 ```yaml
 history:
   - action: created
-    at: 2026-01-31T17:00:00-08:00
+    at: 2026-02-01T17:00:00-08:00
     by: claude-agent
-    
+
   - action: dispatched
-    at: 2026-01-31T17:00:01-08:00
+    at: 2026-02-01T17:00:01-08:00
     by: exchange
     note: "notified teague-phone via slack"
-    
+
   - action: claimed
-    at: 2026-01-31T17:00:30-08:00
+    at: 2026-02-01T17:00:30-08:00
     by: teague-phone
-    
+    ref: 2026-02-01-001-fridge-check/claim-001
+
   - action: completed
-    at: 2026-01-31T17:05:00-08:00
+    at: 2026-02-01T17:05:00-08:00
     by: teague-phone
+    ref: 2026-02-01-001-fridge-check/response-002-inventory
 ```
 
 ---
@@ -346,38 +509,43 @@ history:
 ## Example: Complete Thread
 
 ```yaml
-ref: 2026-01-31-001
+ref: 2026-02-01-001-fridge-check
+client_id: check-fridge
 requestor: claude-agent
 executor: teague-phone
 status: completed
-created: 2026-01-31T17:00:00-08:00
-updated: 2026-01-31T17:05:00-08:00
+created: 2026-02-01T17:00:00-08:00
+updated: 2026-02-01T17:05:00-08:00
 intent: check what's in the fridge
 priority: normal
 
 history:
   - action: created
-    at: 2026-01-31T17:00:00-08:00
+    at: 2026-02-01T17:00:00-08:00
     by: claude-agent
   - action: dispatched
-    at: 2026-01-31T17:00:01-08:00
+    at: 2026-02-01T17:00:01-08:00
     by: exchange
     note: "notified via slack"
   - action: claimed
-    at: 2026-01-31T17:00:30-08:00
+    at: 2026-02-01T17:00:30-08:00
     by: teague-phone
+    ref: 2026-02-01-001-fridge-check/claim-001
   - action: completed
-    at: 2026-01-31T17:05:00-08:00
+    at: 2026-02-01T17:05:00-08:00
     by: teague-phone
+    ref: 2026-02-01-001-fridge-check/response-002-inventory
 
 ---
+# Request (creates thread, no re: needed)
 from: claude-agent
-received: 2026-01-31T17:00:00-08:00
+received: 2026-02-01T17:00:00-08:00
 channel: mcp
 
 MESS:
   - v: 1.0.0
   - request:
+      id: check-fridge
       intent: check what's in the fridge
       context:
         - Planning dinner for 4
@@ -387,43 +555,68 @@ MESS:
         - image
 
 ---
+# Exchange ack (system message, no message ref)
 from: exchange
-received: 2026-01-31T17:00:01-08:00
+received: 2026-02-01T17:00:01-08:00
 
 MESS:
   - ack:
-      re: last
-      ref: 2026-01-31-001
+      re: check-fridge
+      ref: 2026-02-01-001-fridge-check
 
 ---
+# Executor claims (message-level re:)
 from: teague-phone
-received: 2026-01-31T17:00:30-08:00
+received: 2026-02-01T17:00:30-08:00
 channel: http
+re: 2026-02-01-001-fridge-check
 
 MESS:
   - status:
-      re: 2026-01-31-001
       code: claimed
 
 ---
+# Exchange ack for claim
+from: exchange
+received: 2026-02-01T17:00:30-08:00
+
+MESS:
+  - ack:
+      ref: 2026-02-01-001-fridge-check/claim-001
+
+---
+# Executor completes with response
 from: teague-phone
-received: 2026-01-31T17:05:00-08:00
+received: 2026-02-01T17:05:00-08:00
 channel: http
+re: 2026-02-01-001-fridge-check
 
 MESS:
   - status:
-      re: 2026-01-31-001
       code: completed
   - response:
-      re: 2026-01-31-001
+      id: inventory
       content:
-        - image: data:image/jpeg;base64,/9j/4AAQ...
+        - image:
+            file: att-002-image-fridge.jpg
+            mime: image/jpeg
+            size: 328847
         - |
           Proteins: chicken thighs (1 lb, expires tomorrow)
           Vegetables: broccoli, carrots, half onion
           Dairy: milk, cheddar, butter
           Pantry: rice, pasta, soy sauce
       notes: chicken should be used tonight
+
+---
+# Exchange ack for response
+from: exchange
+received: 2026-02-01T17:05:00-08:00
+
+MESS:
+  - ack:
+      re: inventory
+      ref: 2026-02-01-001-fridge-check/response-002-inventory
 ```
 
 ---
@@ -431,88 +624,129 @@ MESS:
 ## Example: Needs Input Flow
 
 ```yaml
-ref: 2026-01-31-002
+ref: 2026-02-01-002-vacuum-spill
 requestor: claude-agent
 executor: roomba-kitchen
 status: in_progress
-created: 2026-01-31T18:00:00-08:00
-updated: 2026-01-31T18:03:00-08:00
+created: 2026-02-01T18:00:00-08:00
+updated: 2026-02-01T18:03:00-08:00
 intent: vacuum the kitchen spill
 priority: normal
 
 history:
   - action: created
-    at: 2026-01-31T18:00:00-08:00
+    at: 2026-02-01T18:00:00-08:00
     by: claude-agent
   - action: claimed
-    at: 2026-01-31T18:00:05-08:00
+    at: 2026-02-01T18:00:05-08:00
     by: roomba-kitchen
+    ref: 2026-02-01-002-vacuum-spill/claim-001
   - action: needs_input
-    at: 2026-01-31T18:01:00-08:00
+    at: 2026-02-01T18:01:00-08:00
     by: roomba-kitchen
+    ref: 2026-02-01-002-vacuum-spill/question-002-which-area
     note: "multiple spills detected"
   - action: replied
-    at: 2026-01-31T18:02:30-08:00
+    at: 2026-02-01T18:02:30-08:00
     by: claude-agent
+    ref: 2026-02-01-002-vacuum-spill/answer-003-both
   - action: in_progress
-    at: 2026-01-31T18:03:00-08:00
+    at: 2026-02-01T18:03:00-08:00
     by: roomba-kitchen
+    ref: 2026-02-01-002-vacuum-spill/status-004
 
 ---
+# Request
 from: claude-agent
-received: 2026-01-31T18:00:00-08:00
+received: 2026-02-01T18:00:00-08:00
 channel: mcp
 
 MESS:
+  - v: 1.0.0
   - request:
+      id: vacuum-spill
       intent: vacuum the kitchen spill
       context:
         - Rice spill near the sink
 
 ---
+# Exchange ack
+from: exchange
+received: 2026-02-01T18:00:00-08:00
+
+MESS:
+  - ack:
+      re: vacuum-spill
+      ref: 2026-02-01-002-vacuum-spill
+
+---
+# Executor claims
 from: roomba-kitchen
-received: 2026-01-31T18:00:05-08:00
+received: 2026-02-01T18:00:05-08:00
 channel: webhook
+re: 2026-02-01-002-vacuum-spill
 
 MESS:
   - status:
-      re: 2026-01-31-002
       code: claimed
 
 ---
+# Executor asks a question
 from: roomba-kitchen
-received: 2026-01-31T18:01:00-08:00
+received: 2026-02-01T18:01:00-08:00
 channel: webhook
+re: 2026-02-01-002-vacuum-spill
 
 MESS:
   - status:
-      re: 2026-01-31-002
       code: needs_input
       message: multiple spills detected
       questions:
-        - field: location
+        - id: which-area
           question: "Rice near sink AND crumbs by stove. Which area?"
           options: [near sink, by stove, both]
 
 ---
-from: claude-agent
-received: 2026-01-31T18:02:30-08:00
-channel: mcp
+# Exchange ack for question
+from: exchange
+received: 2026-02-01T18:01:00-08:00
 
 MESS:
-  - reply:
-      re: 2026-01-31-002
-      answers:
-        location: both
+  - ack:
+      re: which-area
+      ref: 2026-02-01-002-vacuum-spill/question-002-which-area
 
 ---
+# Agent answers the question (re: the specific question)
+from: claude-agent
+received: 2026-02-01T18:02:30-08:00
+channel: mcp
+re: 2026-02-01-002-vacuum-spill/question-002-which-area
+
+MESS:
+  - answer:
+      id: both
+      value: both
+
+---
+# Exchange ack for answer
+from: exchange
+received: 2026-02-01T18:02:30-08:00
+
+MESS:
+  - ack:
+      re: both
+      ref: 2026-02-01-002-vacuum-spill/answer-003-both
+
+---
+# Executor resumes work
 from: roomba-kitchen
-received: 2026-01-31T18:03:00-08:00
+received: 2026-02-01T18:03:00-08:00
 channel: webhook
+re: 2026-02-01-002-vacuum-spill
 
 MESS:
   - status:
-      re: 2026-01-31-002
       code: in_progress
       message: starting with sink area
 ```
@@ -829,10 +1063,12 @@ exchange/
 att-{serial}-{type}-{original_name_sanitized}.{ext}
 ```
 
+The serial number matches the message serial that introduced the attachment, making it easy to associate attachments with their source messages.
+
 Examples:
-- `att-001-image-IMG_0001.jpg`
-- `att-002-file-assembly_instructions.pdf`
-- `att-003-image-photo.png`
+- `att-001-image-IMG_0001.jpg` — from message `claim-001`
+- `att-002-image-fridge.jpg` — from message `response-002`
+- `att-005-file-receipt.pdf` — from message `response-005`
 
 **Type prefixes:**
 - `image` - jpg, png, gif, webp
@@ -840,20 +1076,78 @@ Examples:
 - `video` - mp4, mov, webm
 - `file` - pdf, doc, txt, etc.
 
-**In YAML (relative paths with original name preserved):**
+**In YAML — File Context (filesystem storage):**
 ```yaml
 content:
-  - file:
-      path: att-001-image-IMG_0001.jpg    # Relative to thread directory
-      name: IMG_0001.jpg                   # Original filename
+  - image:
+      file: att-002-image-fridge.jpg      # Relative to thread directory
+      name: IMG_0001.jpg                   # Original filename (optional)
       mime: image/jpeg
+      size: 328847                         # Size in bytes
   - file:
-      path: att-002-file-assembly_instructions.pdf
-      name: Assembly Instructions.pdf
+      file: att-005-file-receipt.pdf
+      name: Grocery Receipt.pdf
       mime: application/pdf
+      size: 45230
   - Small inline text stays inline
-  - image: data:image/png;base64,...  # Images under 768KB can stay inline
+  - image: data:image/png;base64,...      # Images under 768KB can stay inline
 ```
+
+**Required fields for external attachments:**
+| Field | Required | Description |
+|-------|----------|-------------|
+| `file` | Yes | Relative path to attachment file |
+| `mime` | Yes | MIME type |
+| `size` | Yes | Size in bytes |
+| `name` | No | Original filename if different from stored name |
+
+### Resource URIs (MCP Context)
+
+When serving content via MCP (not direct filesystem access), attachments are referenced using `content://` resource URIs instead of file paths:
+
+```yaml
+content:
+  - image:
+      resource: content://2026-02-01-003-fridge-check/att-002-image-fridge.jpg
+      mime: image/jpeg
+      size: 328847
+  - "Here's what's in the fridge"
+```
+
+**Resource URI format:**
+```
+content://{thread-ref}/{attachment-filename}
+```
+
+Or for message-specific references:
+```
+content://{thread-ref}/{message-ref}/{attachment-filename}
+```
+
+Examples:
+- `content://2026-02-01-003-fridge-check/att-002-image-fridge.jpg`
+- `content://2026-02-01-003-fridge-check/response-002-inventory/att-002-image-fridge.jpg`
+
+**MCP Server Behavior:**
+
+1. When returning thread status, the MCP server:
+   - Extracts embedded base64 data from responses
+   - Writes attachments to local cache
+   - Rewrites inline `data:` URIs to `content://` resource URIs
+   - Returns lightweight response with resource references
+
+2. Agents fetch resources on-demand:
+   - View text content immediately
+   - Request specific attachments via MCP resource protocol when needed
+   - Avoids blowing context with large base64 payloads
+
+**When to use which format:**
+
+| Context | Format | Example |
+|---------|--------|---------|
+| Filesystem storage | `file:` | `file: att-002-image-fridge.jpg` |
+| MCP/API response | `resource:` | `resource: content://...` |
+| Small inline data | `data:` | `image: data:image/png;base64,...` |
 
 ### Reading a Thread
 
@@ -912,4 +1206,4 @@ When status changes require moving to a different folder:
 
 ---
 
-*MESSE-AF v2.0.0 — Directory-based storage format*
+*MESSE-AF v2.1.0 — Directory-based storage with addressable messages and resource URIs*
