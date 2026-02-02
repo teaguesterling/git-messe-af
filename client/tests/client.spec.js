@@ -7,7 +7,8 @@ import {
   mockFileList,
   mockFileContent,
   serializeThread,
-  encodeContent
+  encodeContent,
+  getThreadYaml
 } from './fixtures/mock-data.js';
 
 // Helper to set up localStorage with config - must be called after navigating to the page
@@ -74,16 +75,18 @@ async function setupGitHubMocks(page, options = {}) {
       return route.fulfill({ json: mockFileList(folderThreads, folder) });
     }
 
-    // Get file content
-    const fileMatch = url.match(/\/contents\/exchange\/state=(\w+)\/([^?]+\.yaml)/);
+    // Get file content - handles both v1 (flat) and v2 (directory) formats
+    const fileMatch = url.match(/\/contents\/exchange\/state=(\w+)\/(.+\.yaml)/);
     if (fileMatch && method === 'GET') {
-      const [, folder, filename] = fileMatch;
-      const ref = filename.replace('.messe-af.yaml', '');
+      const [, folder, pathPart] = fileMatch;
+      // Extract ref from path - handles both "ref.messe-af.yaml" (v1) and "ref/000-ref.messe-af.yaml" (v2)
+      const refMatch = pathPart.match(/^([^/]+?)(?:\/|\.messe-af\.yaml)/);
+      const ref = refMatch ? refMatch[1] : pathPart.replace('.messe-af.yaml', '');
       const thread = (folders[folder] || []).find(t => t.ref === ref);
       if (!thread) {
         return route.fulfill({ status: 404, json: { message: '404 Not Found' } });
       }
-      const path = `exchange/state=${folder}/${filename}`;
+      const path = `exchange/state=${folder}/${pathPart}`;
       return route.fulfill({ json: mockFileContent(thread, messages, path) });
     }
 
@@ -111,6 +114,24 @@ async function setupGitHubMocks(page, options = {}) {
     // Get commit (for tree sha)
     if (url.match(/\/git\/commits\/[^/]+$/) && method === 'GET') {
       return route.fulfill({ json: { tree: { sha: 'current-tree-sha' } } });
+    }
+
+    // Get recursive tree (for thread discovery)
+    if (url.match(/\/git\/trees\/[^/]+\?recursive=1/) && method === 'GET') {
+      // Build tree entries from folders configuration
+      const treeEntries = [];
+      for (const [folder, folderThreads] of Object.entries(folders)) {
+        for (const thread of folderThreads) {
+          // Add v2 directory-style entry
+          treeEntries.push({
+            path: `exchange/state=${folder}/${thread.ref}/000-${thread.ref}.messe-af.yaml`,
+            mode: '100644',
+            type: 'blob',
+            sha: `sha-${thread.ref}`
+          });
+        }
+      }
+      return route.fulfill({ json: { sha: 'current-tree-sha', truncated: false, tree: treeEntries } });
     }
 
     // Create tree
@@ -144,6 +165,39 @@ async function setupGitHubMocks(page, options = {}) {
     // Default: let it through (will fail but we can see what's missing)
     console.log('Unhandled API request:', method, url);
     return route.fulfill({ status: 404, json: { message: `Not Found: ${url}` } });
+  });
+
+  // Mock GitHub GraphQL API for batch file fetching
+  await page.route('https://api.github.com/graphql', async (route, request) => {
+    const body = JSON.parse(request.postData());
+    const query = body.query;
+
+    // Parse file requests from the query
+    // Query format: f0: object(expression: "main:path/to/file") { ... on Blob { text oid } }
+    const fileMatches = query.matchAll(/f(\d+):\s*object\(expression:\s*"main:([^"]+)"\)/g);
+    const results = { data: { repository: {} } };
+
+    for (const match of fileMatches) {
+      const [, index, path] = match;
+      // Extract folder and ref from path
+      const pathMatch = path.match(/exchange\/state=(\w+)\/([^/]+)/);
+      if (pathMatch) {
+        const [, folder, refPart] = pathMatch;
+        // Handle both v1 (ref.yaml) and v2 (ref/000-ref.yaml) formats
+        const ref = refPart.replace('.messe-af.yaml', '');
+        const thread = (folders[folder] || []).find(t => t.ref === ref);
+        if (thread) {
+          // Return mock YAML content
+          const content = getThreadYaml(thread, messages);
+          results.data.repository[`f${index}`] = {
+            text: content,
+            oid: `sha-${thread.ref}`
+          };
+        }
+      }
+    }
+
+    return route.fulfill({ json: results });
   });
 }
 
