@@ -1,0 +1,36 @@
+id: pet-status
+name: Pet Status Check
+description: Check on pets and report their status.
+category: care
+
+extended_description: |
+  Check on household pets and report their status.
+
+  Look for:
+  - Where the pet is located
+  - General demeanor (active, sleeping, anxious)
+  - Food and water bowl levels
+  - Any obvious signs of distress
+
+  Take a photo if requested. Note anything unusual
+  about behavior or appearance.
+
+tools:
+  - physical-access
+  - camera
+
+examples:
+  - How is the dog doing?
+  - Check on the cat
+  - Does the dog have water?
+  - Where is the cat?
+
+response_hints:
+  - image
+  - text
+
+estimated_duration: 1-3 minutes
+tags:
+  - pets
+  - animals
+  - care

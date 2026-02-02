@@ -42,10 +42,16 @@ import {
 // Config
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const MESS_DIR = process.env.MESS_DIR || path.join(__dirname, '..', 'exchange');
+const CAPABILITIES_DIR = process.env.MESS_CAPABILITIES_DIR || path.join(__dirname, '..', 'capabilities');
 const GITHUB_REPO = process.env.MESS_GITHUB_REPO; // format: owner/repo
 const GITHUB_TOKEN = process.env.MESS_GITHUB_TOKEN;
 const GITHUB_ONLY = process.env.MESS_GITHUB_ONLY === 'true';
 const AGENT_ID = process.env.MESS_AGENT_ID || 'claude-agent';
+
+// Capabilities cache
+let capabilitiesCache = null;
+let capabilitiesCacheTime = 0;
+const CAPABILITIES_CACHE_TTL = 60000; // 1 minute
 
 // Attachment cache directory
 const CACHE_DIR = process.env.MESS_CACHE_DIR || path.join(os.tmpdir(), 'mess-attachments');
@@ -164,6 +170,146 @@ function guessMimeType(filename) {
     mp3: 'audio/mpeg', mp4: 'video/mp4', txt: 'text/plain'
   };
   return mimeTypes[ext] || 'application/octet-stream';
+}
+
+// ============ Capabilities ============
+
+/**
+ * Load capabilities from local directory
+ * @returns {Promise<Array>} List of capabilities
+ */
+async function loadLocalCapabilities() {
+  const capabilities = [];
+
+  try {
+    const entries = await fs.readdir(CAPABILITIES_DIR, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.yaml') && !entry.name.startsWith('_')) {
+        try {
+          const content = await fs.readFile(path.join(CAPABILITIES_DIR, entry.name), 'utf-8');
+          const cap = YAML.parse(content);
+          if (cap.id) {
+            capabilities.push(cap);
+          }
+        } catch (e) {
+          console.error(`Failed to parse capability ${entry.name}:`, e.message);
+        }
+      }
+    }
+
+    // Load index for ordering if it exists
+    try {
+      const indexPath = path.join(CAPABILITIES_DIR, '_index.yaml');
+      const indexContent = await fs.readFile(indexPath, 'utf-8');
+      const index = YAML.parse(indexContent);
+
+      if (index.order) {
+        // Sort capabilities by index order
+        capabilities.sort((a, b) => {
+          const aIdx = index.order.indexOf(a.id);
+          const bIdx = index.order.indexOf(b.id);
+          if (aIdx === -1 && bIdx === -1) return a.id.localeCompare(b.id);
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        });
+      }
+    } catch (e) {
+      // No index file, sort alphabetically
+      capabilities.sort((a, b) => a.id.localeCompare(b.id));
+    }
+  } catch (e) {
+    if (e.code !== 'ENOENT') {
+      console.error('Failed to load local capabilities:', e.message);
+    }
+  }
+
+  return capabilities;
+}
+
+/**
+ * Load capabilities from GitHub
+ * @param {GitHubAPI} github - GitHub API client
+ * @returns {Promise<Array>} List of capabilities
+ */
+async function loadGitHubCapabilities(github) {
+  const capabilities = [];
+
+  try {
+    const entries = await github.getDirectory('capabilities');
+    if (!entries) return capabilities;
+
+    for (const entry of entries) {
+      if (entry.type === 'file' && entry.name.endsWith('.yaml') && !entry.name.startsWith('_')) {
+        try {
+          const result = await github.getFile(`capabilities/${entry.name}`);
+          if (result) {
+            const cap = YAML.parse(result.content);
+            if (cap.id) {
+              capabilities.push(cap);
+            }
+          }
+        } catch (e) {
+          console.error(`Failed to parse capability ${entry.name}:`, e.message);
+        }
+      }
+    }
+
+    // Load index for ordering
+    try {
+      const indexResult = await github.getFile('capabilities/_index.yaml');
+      if (indexResult) {
+        const index = YAML.parse(indexResult.content);
+        if (index.order) {
+          capabilities.sort((a, b) => {
+            const aIdx = index.order.indexOf(a.id);
+            const bIdx = index.order.indexOf(b.id);
+            if (aIdx === -1 && bIdx === -1) return a.id.localeCompare(b.id);
+            if (aIdx === -1) return 1;
+            if (bIdx === -1) return -1;
+            return aIdx - bIdx;
+          });
+        }
+      }
+    } catch (e) {
+      capabilities.sort((a, b) => a.id.localeCompare(b.id));
+    }
+  } catch (e) {
+    console.error('Failed to load GitHub capabilities:', e.message);
+  }
+
+  return capabilities;
+}
+
+/**
+ * Get capabilities with caching
+ * @returns {Promise<Array>} List of capabilities
+ */
+async function getCapabilities() {
+  const now = Date.now();
+
+  // Return cached if fresh
+  if (capabilitiesCache && (now - capabilitiesCacheTime) < CAPABILITIES_CACHE_TTL) {
+    return capabilitiesCache;
+  }
+
+  let capabilities = [];
+
+  // Load from local first (if not GitHub-only mode)
+  if (!GITHUB_ONLY) {
+    capabilities = await loadLocalCapabilities();
+  }
+
+  // If GitHub is configured and no local capabilities, load from GitHub
+  if (capabilities.length === 0 && github) {
+    capabilities = await loadGitHubCapabilities(github);
+  }
+
+  capabilitiesCache = capabilities;
+  capabilitiesCacheTime = now;
+
+  return capabilities;
 }
 
 // ============ GitHub API ============
@@ -916,6 +1062,32 @@ Use to:
           ref: { type: 'string', description: 'Specific thread ref (e.g., "2026-01-31-001")' }
         }
       }
+    },
+    {
+      name: 'mess_capabilities',
+      description: `List available physical-world capabilities for this exchange.
+
+Returns capabilities that human executors can perform, such as:
+- Checking doors, appliances, or security
+- Package and delivery checks
+- Pet care and plant watering
+- Fridge/pantry inventory
+
+Each capability includes:
+- id: Unique identifier
+- name: Human-readable name
+- description: What the capability does
+- examples: Example requests that match this capability
+- tools: Physical tools/access required
+- response_hints: Expected response types (text, image, etc.)
+
+Use this to understand what kinds of physical-world tasks can be requested.`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', description: 'Filter by category (e.g., "security", "care", "maintenance")' }
+        }
+      }
     }
   ]
 }));
@@ -962,6 +1134,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'mess_status') {
       const result = await getStatus(args.ref);
       return { content: [{ type: 'text', text: YAML.stringify(result) }] };
+    }
+
+    if (name === 'mess_capabilities') {
+      const capabilities = await getCapabilities();
+      let result = capabilities;
+
+      // Filter by category if specified
+      if (args.category) {
+        result = capabilities.filter(c => c.category === args.category);
+      }
+
+      // Return summary format for listing
+      const summary = result.map(c => ({
+        id: c.id,
+        name: c.name,
+        description: c.description,
+        category: c.category,
+        examples: c.examples,
+        response_hints: c.response_hints
+      }));
+
+      return { content: [{ type: 'text', text: YAML.stringify(summary) }] };
     }
 
     return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true };

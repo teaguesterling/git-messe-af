@@ -1,0 +1,38 @@
+id: package-check
+name: Check for Packages
+description: Check if any packages have been delivered.
+category: errands
+
+extended_description: |
+  Check the front porch, mailbox, or designated delivery
+  areas for packages.
+
+  Report:
+  - Number of packages found
+  - Carrier labels visible (Amazon, UPS, FedEx, etc.)
+  - Package sizes
+  - Whether they should be brought inside
+
+  Take photos of packages found. If requested, bring
+  packages inside to a safe location.
+
+tools:
+  - physical-access
+  - camera
+  - mobility
+
+examples:
+  - Are there any packages outside?
+  - Check the front porch for deliveries
+  - Has the Amazon package arrived?
+  - Bring in any packages on the porch
+
+response_hints:
+  - image
+  - text
+
+estimated_duration: 1-2 minutes
+tags:
+  - packages
+  - deliveries
+  - porch

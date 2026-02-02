@@ -1,0 +1,41 @@
+id: water-plants
+name: Water Plants
+description: Water indoor or outdoor plants as needed.
+category: maintenance
+
+extended_description: |
+  Check soil moisture and water plants that need it.
+
+  For indoor plants:
+  - Check if soil is dry (finger test)
+  - Water until it drains from bottom
+  - Empty saucers after 30 minutes
+
+  For outdoor plants:
+  - Check soil moisture
+  - Water at base, not on leaves
+  - Note any plants that look stressed
+
+  Report which plants were watered and any that look
+  unhealthy or need attention.
+
+tools:
+  - physical-access
+  - water-access
+
+examples:
+  - Water the houseplants
+  - Check if the garden needs watering
+  - Water the tomatoes
+  - Are any plants looking droopy?
+
+response_hints:
+  - text
+  - image
+
+priority_default: background
+estimated_duration: 5-15 minutes
+tags:
+  - plants
+  - garden
+  - maintenance

@@ -1,0 +1,35 @@
+id: check-stove
+name: Check Stove/Oven
+description: Verify if the stove or oven is turned off.
+category: security
+
+extended_description: |
+  Check the stove and oven to confirm they are off.
+  Look for:
+  - All burner knobs in OFF position
+  - Oven is off (check display/indicator light)
+  - No residual heat warnings
+
+  Take a photo of the controls for confirmation.
+  This is a common "did I leave it on?" anxiety check.
+
+tools:
+  - physical-access
+  - camera
+
+examples:
+  - Is the stove off?
+  - Did I leave the oven on?
+  - Check the stove and oven
+  - Make sure all burners are off
+
+response_hints:
+  - image
+  - text
+
+priority_default: elevated
+estimated_duration: "< 1 minute"
+tags:
+  - kitchen
+  - safety
+  - appliances
