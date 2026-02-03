@@ -772,8 +772,13 @@ async function findThread(ref) {
             }
           }
         }
-        const parsed = parseThread(files);
-        return { folder, ghDirPath, files, ...parsed, source: 'github', format: 'v2' };
+        try {
+          const parsed = parseThread(files);
+          return { folder, ghDirPath, files, ...parsed, source: 'github', format: 'v2' };
+        } catch (e) {
+          // Directory exists but no valid YAML files (may be mid-move), try next folder
+          continue;
+        }
       }
 
       // Check for v1 flat file format
