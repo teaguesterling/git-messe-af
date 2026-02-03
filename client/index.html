@@ -2003,10 +2003,19 @@
     }
 
     // Filter threads based on current filter settings
-    function filterThreads(threads) {
+    function filterThreads(threads, folder) {
       let filtered = threads;
       const myCaps = state.config?.capabilities || [];
       const myId = state.config?.executorId;
+
+      // In the executing folder, always hide threads claimed by other executors
+      if (folder === 'executing' && myId) {
+        filtered = filtered.filter(t => {
+          // Show if no executor assigned yet, or if I'm the executor
+          if (!t.executor) return true;
+          return t.executor === myId;
+        });
+      }
 
       if (state.filters.capableOnly && myCaps.length > 0) {
         filtered = filtered.filter(t => {
@@ -2048,7 +2057,7 @@
 
     function renderMain() {
       const allThreads = state.threads[state.currentFolder] || [];
-      const threads = filterThreads(allThreads);
+      const threads = filterThreads(allThreads, state.currentFolder);
       const filteredCount = allThreads.length - threads.length;
 
       const folders = [
