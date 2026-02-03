@@ -3037,9 +3037,14 @@
       }
     }
 
-    async function refresh() {
+    async function refresh(forceInvalidate = true) {
       if (!state.github) return;
       state.loading = true; render();
+
+      // Invalidate tree cache to get fresh data (default behavior)
+      if (forceInvalidate) {
+        state.github.invalidateTreeCache();
+      }
 
       const folders = ['received', 'executing', 'finished', 'canceled'];
       const currentFolder = state.currentFolder;
