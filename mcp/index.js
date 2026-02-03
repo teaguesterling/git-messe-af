@@ -1466,17 +1466,38 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const startTime = Date.now();
       const endTime = startTime + (timeout * 1000);
 
+      // Track initial state at start of wait (independent of shared threadLastSeenState)
+      const initialState = new Map();
+
       // Helper to check for updates
       const checkUpdates = async () => {
-        const threads = await getStatus(undefined); // List all threads
+        if (targetRef) {
+          // Check specific thread directly (includes finished/canceled)
+          const thread = await getStatus(targetRef);
+          if (thread.error) return [];
 
-        // Filter to target ref if specified
-        const relevantThreads = targetRef
-          ? threads.filter(t => t.ref === targetRef)
-          : threads;
+          // Record initial state on first check
+          if (!initialState.has(targetRef)) {
+            initialState.set(targetRef, {
+              status: thread.status,
+              updated: thread.updated
+            });
+            return []; // No updates on first check - we just recorded baseline
+          }
 
-        // Return threads with updates
-        return relevantThreads.filter(t => t.hasUpdates);
+          // Check if this thread changed since we started waiting
+          const baseline = initialState.get(targetRef);
+          const hasUpdates = thread.status !== baseline.status || thread.updated !== baseline.updated;
+
+          if (hasUpdates) {
+            return [{ ...thread, hasUpdates: true }];
+          }
+          return [];
+        } else {
+          // List all active threads - use shared state for list mode
+          const threads = await getStatus(undefined);
+          return threads.filter(t => t.hasUpdates);
+        }
       };
 
       // First check - return immediately if there are already updates
