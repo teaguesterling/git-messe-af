@@ -296,11 +296,11 @@ Wait for changes to threads instead of polling `mess_status` repeatedly.
 
 **Parameters:**
 - `ref`: Optional thread ref to watch specifically
-- `timeout`: Max seconds to wait (default: 60, max: 300)
+- `timeout`: Max seconds to wait (default: 60, max: 43200 / 12 hours)
 
 **Example:**
 ```json
-{ "ref": "2026-02-01-001", "timeout": 120 }
+{ "ref": "2026-02-01-001", "timeout": 3600 }
 ```
 
 **Returns:**
@@ -313,7 +313,7 @@ waited: 5
 timedOut: false
 ```
 
-Returns immediately if threads already have updates since last `mess_status` call. Returns empty `updated` array if timeout expires with no changes.
+Poll frequency scales with timeout (~30 polls): 60s→2s, 1h→2min, 12h→24min. Returns empty `updated` array if timeout expires with no changes.
 
 ## Resources
 

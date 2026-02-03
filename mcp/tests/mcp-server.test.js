@@ -1751,14 +1751,27 @@ describe('hasUpdates Flag', () => {
 describe('mess_wait Tool', () => {
   it('timeout is clamped to valid range', () => {
     // Test the clamping logic (0 is treated as falsy, uses default)
-    const clampTimeout = (t) => Math.min(Math.max(t || 60, 1), 300);
+    // Max is now 43200 (12 hours)
+    const clampTimeout = (t) => Math.min(Math.max(t || 60, 1), 43200);
 
-    assert.strictEqual(clampTimeout(undefined), 60); // default
-    assert.strictEqual(clampTimeout(30), 30);        // valid
-    assert.strictEqual(clampTimeout(0), 60);         // falsy, uses default
-    assert.strictEqual(clampTimeout(-5), 1);         // negative clamped to 1
-    assert.strictEqual(clampTimeout(500), 300);      // max clamped
-    assert.strictEqual(clampTimeout(300), 300);      // exactly max
+    assert.strictEqual(clampTimeout(undefined), 60);    // default
+    assert.strictEqual(clampTimeout(30), 30);           // valid
+    assert.strictEqual(clampTimeout(0), 60);            // falsy, uses default
+    assert.strictEqual(clampTimeout(-5), 1);            // negative clamped to 1
+    assert.strictEqual(clampTimeout(50000), 43200);     // max clamped to 12 hours
+    assert.strictEqual(clampTimeout(43200), 43200);     // exactly max
+    assert.strictEqual(clampTimeout(3600), 3600);       // 1 hour valid
+  });
+
+  it('poll interval scales with timeout', () => {
+    // ~30 polls total, minimum 2 seconds
+    const calcInterval = (timeout) => Math.max(2000, Math.floor(timeout * 1000 / 30));
+
+    assert.strictEqual(calcInterval(30), 2000);         // 30s -> 2s (min)
+    assert.strictEqual(calcInterval(60), 2000);         // 60s -> 2s (min)
+    assert.strictEqual(calcInterval(300), 10000);       // 5 min -> 10s
+    assert.strictEqual(calcInterval(3600), 120000);     // 1 hour -> 2 min
+    assert.strictEqual(calcInterval(43200), 1440000);   // 12 hours -> 24 min
   });
 
   it('returns immediately when updates exist', () => {

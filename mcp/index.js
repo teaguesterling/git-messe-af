@@ -1311,7 +1311,8 @@ Returns immediately if there are already threads with updates since your last me
 
 **When to use:**
 - After creating a request, call mess_wait to be notified when it's claimed/completed
-- Use timeout for long-running waits (default: 60 seconds, max: 300 seconds)
+- Use timeout for long-running waits (default: 60 seconds, max: 12 hours)
+- Poll frequency scales with timeout (~30 polls total)
 
 **Returns:**
 - List of threads that changed, with \`hasUpdates: true\`
@@ -1460,9 +1461,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'mess_wait') {
-      const timeout = Math.min(Math.max(args.timeout || 60, 1), 300); // 1-300 seconds
+      const timeout = Math.min(Math.max(args.timeout || 60, 1), 43200); // 1 second to 12 hours
       const targetRef = args.ref;
-      const pollInterval = 2000; // 2 seconds between checks
+      // Scale poll interval: ~30 polls total, minimum 2 seconds
+      const pollInterval = Math.max(2000, Math.floor(timeout * 1000 / 30));
       const startTime = Date.now();
       const endTime = startTime + (timeout * 1000);
 

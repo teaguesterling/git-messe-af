@@ -286,7 +286,7 @@ Wait for changes to threads instead of polling `mess_status` repeatedly.
 **Input:**
 ```yaml
 ref: "2026-02-01-001"  # optional: wait for specific thread
-timeout: 60             # optional: max seconds (default: 60, max: 300)
+timeout: 60             # optional: seconds (default: 60, max: 43200 / 12 hours)
 ```
 
 **Response:**
@@ -299,9 +299,15 @@ waited: 5
 timedOut: false
 ```
 
+**Adaptive polling:** Poll frequency scales with timeout (~30 polls total):
+- 60s timeout → polls every 2s
+- 5 min → every 10s
+- 1 hour → every 2 min
+- 12 hours → every 24 min
+
 **When to use:**
 - After creating a request, call `mess_wait` to be notified when claimed/completed
-- Returns immediately if threads already have updates since your last `mess_status` call
+- Returns immediately if thread changed since wait started
 - Use for efficient long-running waits instead of polling
 
 **Example workflow:**
@@ -310,10 +316,10 @@ timedOut: false
 mess_request:
   intent: "Check if the garage door is closed"
 
-# 2. Wait for it to be completed (up to 5 minutes)
+# 2. Wait for it to be completed (up to 1 hour)
 mess_wait:
   ref: "2026-02-01-001"
-  timeout: 300
+  timeout: 3600
 
 # 3. Response returns when status changes or timeout
 ```

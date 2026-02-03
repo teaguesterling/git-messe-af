@@ -129,7 +129,7 @@ Wait for changes to threads instead of polling `mess_status` repeatedly.
 **Input:**
 ```yaml
 ref: "2026-02-01-001"  # optional
-timeout: 60             # optional (default: 60, max: 300)
+timeout: 60             # optional (default: 60, max: 43200 / 12 hours)
 ```
 
 **Response:**
@@ -141,6 +141,8 @@ updated:
 waited: 5
 timedOut: false
 ```
+
+Poll frequency scales with timeout (~30 polls): 60s→2s, 1h→2min, 12h→24min.
 
 Returns immediately if threads have updates since last `mess_status` call. Returns empty `updated` array if timeout expires.
 
