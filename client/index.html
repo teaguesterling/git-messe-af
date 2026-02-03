@@ -2202,9 +2202,14 @@
               <p class="text-sm text-muted mt-1">${thread.ref} · ${formatTime(thread.updated)}</p>
             </div>
             ${thread.status === 'pending' ? `
-              <button class="quick-claim btn btn-primary btn-sm shrink-0" data-ref="${thread.ref}">
-                Claim
-              </button>
+              <div class="flex gap-1 shrink-0">
+                <button class="quick-claim btn btn-primary btn-sm" data-ref="${thread.ref}" title="Claim">
+                  Claim
+                </button>
+                <button class="quick-complete btn btn-ghost btn-sm border" data-ref="${thread.ref}" title="Quick complete (claim + done)">
+                  ✓
+                </button>
+              </div>
             ` : `
               <svg class="shrink-0 text-muted" style="width:1.25rem;height:1.25rem" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -2723,7 +2728,7 @@
 
       document.querySelectorAll('.thread-row').forEach(row => {
         row.addEventListener('click', (e) => {
-          if (e.target.closest('.quick-claim')) return;
+          if (e.target.closest('.quick-claim') || e.target.closest('.quick-complete')) return;
           const allThreads = state.threads[state.currentFolder] || [];
           state.selectedThread = allThreads.find(t => t.ref === row.dataset.ref);
           render();
@@ -2732,6 +2737,10 @@
 
       document.querySelectorAll('.quick-claim').forEach(btn => {
         btn.addEventListener('click', async (e) => { e.stopPropagation(); await handleAction('claim', btn.dataset.ref); });
+      });
+
+      document.querySelectorAll('.quick-complete').forEach(btn => {
+        btn.addEventListener('click', async (e) => { e.stopPropagation(); await handleAction('quick-complete', btn.dataset.ref); });
       });
     }
 
@@ -3169,6 +3178,14 @@
         if (pendingFile) content.push({ file: pendingFile });
         if (responseText) content.push(responseText);
         if (content.length) mess.push({ response: { re: ref, content } });
+        newStatus = 'completed';
+      }
+      else if (action === 'quick-complete') {
+        // Claim and complete in one action (no response content)
+        mess = [
+          { status: { re: ref, code: 'claimed' } },
+          { status: { re: ref, code: 'completed' } }
+        ];
         newStatus = 'completed';
       }
       else if (action === 'failed') { mess = [{ status: { re: ref, code: 'failed' } }]; newStatus = 'failed'; }
