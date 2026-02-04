@@ -1021,17 +1021,41 @@ async function getStatus(ref) {
       }
     }
 
-    return {
-      ...rewritten.envelope,
-      messages: rewritten.messages,
-      attachments: found.attachments?.map(a => ({
-        name: a.name,
-        resource: `content://${found.envelope.ref}/${a.name}`
-      })),
-      folder: found.folder,
-      source: found.source,
-      format: found.format
+    // Return concise status - full thread available via mess_fetch thread://ref
+    const env = rewritten.envelope;
+    const result = {
+      ref: env.ref,
+      status: env.status,
+      intent: env.intent,
+      updated: env.updated // needed for change detection in mess_wait
     };
+
+    // For completed/cancelled/failed, include the response
+    if (['completed', 'cancelled', 'failed'].includes(env.status)) {
+      // Find the latest response message (from executor)
+      const responses = rewritten.messages?.filter(m => m.from !== env.requestor) || [];
+      const latestResponse = responses[responses.length - 1];
+      if (latestResponse) {
+        result.response = latestResponse.content;
+      }
+      if (found.attachments?.length > 0) {
+        result.attachments = found.attachments.map(a => ({
+          name: a.name,
+          resource: `content://${env.ref}/${a.name}`
+        }));
+      }
+    } else if (env.status === 'needs_input') {
+      // Show the question being asked
+      const questions = rewritten.messages?.filter(m => m.from !== env.requestor) || [];
+      const latestQuestion = questions[questions.length - 1];
+      if (latestQuestion) {
+        result.question = latestQuestion.content;
+      }
+    } else if (env.executor) {
+      result.executor = env.executor;
+    }
+
+    return result;
   }
 
   // List all active threads
@@ -1132,7 +1156,14 @@ async function getStatus(ref) {
   }
   lastStatusCheckTime = now;
 
-  return enrichedResults.sort((a, b) => new Date(b.updated) - new Date(a.updated));
+  // Return concise summary - full details available via mess_fetch thread://ref
+  const sorted = enrichedResults.sort((a, b) => new Date(b.updated) - new Date(a.updated));
+  return sorted.map(t => ({
+    ref: t.ref,
+    status: t.status,
+    intent: t.intent,
+    hasUpdates: t.hasUpdates
+  }));
 }
 
 // ============ MCP Server ============
@@ -1182,20 +1213,11 @@ ${github ? `\n📡 GitHub sync: ${GITHUB_REPO}` : '📁 Local mode: ' + MESS_DIR
       name: 'mess_status',
       description: `Check status of MESS requests.
 
-Without ref: Returns all pending/in-progress requests.
-With ref: Returns full details including message history.
+Without ref: Lists active requests (ref, status, intent, hasUpdates).
+With ref: Returns status and response (if completed) or question (if needs_input).
 
-Use to:
-- See if any requests need attention
-- Check if a request was completed
-- Get responses from completed requests
-
-**Attachments:** Responses may include \`content://\` URIs for images/files.
-Use \`mess_fetch\` to fetch the actual content:
-  mess_fetch: { uri: "content://2026-02-01-001/photo.jpg" }
-
-**Thread data:** Use \`mess_fetch\` with \`thread://\` URIs:
-  mess_fetch: { uri: "thread://2026-02-01-001" }
+For full thread history, use: mess_fetch { uri: "thread://ref" }
+For attachments, use: mess_fetch { uri: "content://ref/filename" }
 
 For full documentation: mess_fetch: { uri: "mess://help" }`,
       inputSchema: {
@@ -1225,10 +1247,18 @@ Use this to understand what kinds of physical-world tasks can be requested.`,
     },
     {
       name: 'mess_request',
-      description: `Create a new physical-world task request.
+      description: `Create a physical-world task request.
 
-This is a simpler alternative to the raw 'mess' tool for creating requests.
-Returns the assigned ref for tracking.`,
+Specify response_hints to tell the executor what you need back:
+- image: photo of something
+- video: recording
+- audio: voice message or sound
+- location: GPS coordinates
+- file: document or data file
+- text: written description
+- confirmation: simple yes/no acknowledgment
+
+Returns the ref for tracking with mess_wait/mess_status.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -1245,8 +1275,8 @@ Returns the assigned ref for tracking.`,
           },
           response_hints: {
             type: 'array',
-            items: { type: 'string', enum: ['text', 'image', 'video', 'audio'] },
-            description: 'Expected response types'
+            items: { type: 'string', enum: ['text', 'image', 'video', 'audio', 'location', 'file', 'confirmation'] },
+            description: 'What kind of response you need. text=written answer, image=photo, video=recording, audio=voice/sound, location=GPS coordinates, file=document/data, confirmation=yes/no acknowledgment'
           }
         },
         required: ['intent']
@@ -1308,20 +1338,10 @@ For thread/text data, returns the content directly.`,
     },
     {
       name: 'mess_wait',
-      description: `Wait for changes to MESS threads.
+      description: `Block until a thread changes or timeout expires.
 
-This tool blocks until one of your threads changes (claimed, completed, needs_input, etc.) or the timeout expires. Use this instead of repeatedly polling mess_status.
-
-Returns immediately if there are already threads with updates since your last mess_status call.
-
-**When to use:**
-- After creating a request, call mess_wait to be notified when it's claimed/completed
-- Use timeout for long-running waits (default: 60 seconds, max: 12 hours)
-- Poll frequency scales with timeout (~30 polls total)
-
-**Returns:**
-- List of threads that changed, with \`hasUpdates: true\`
-- Empty list if timeout expired with no changes`,
+Returns { updated: [{ref, status, intent}], waited, timedOut }.
+Use mess_status(ref) after to get the response or question details.`,
       inputSchema: {
         type: 'object',
         properties: {

@@ -1134,15 +1134,15 @@ describe('Helper Tool Validation', () => {
   });
 
   it('validates response_hints values', () => {
-    const validHints = ['text', 'image', 'video', 'audio'];
-    const args = { response_hints: ['image', 'text'] };
+    const validHints = ['text', 'image', 'video', 'audio', 'location', 'file', 'confirmation'];
+    const args = { response_hints: ['image', 'text', 'location'] };
 
     const allValid = args.response_hints.every(h => validHints.includes(h));
     assert.ok(allValid);
   });
 
   it('rejects invalid response_hints', () => {
-    const validHints = ['text', 'image', 'video', 'audio'];
+    const validHints = ['text', 'image', 'video', 'audio', 'location', 'file', 'confirmation'];
     const args = { response_hints: ['image', 'pdf'] };
 
     const allValid = args.response_hints.every(h => validHints.includes(h));
