@@ -333,7 +333,7 @@ test.describe('Main View', () => {
 
     // Should show detail view with close button and claim action
     await expect(page.locator('#back')).toBeVisible();
-    await expect(page.locator('text=Claim This Request')).toBeVisible();
+    await expect(page.locator('#action-claim')).toBeVisible();
   });
 });
 
@@ -393,10 +393,10 @@ test.describe('Thread Actions', () => {
 
     // Open detail view
     await page.click('.thread-row');
-    await expect(page.locator('text=Claim This Request')).toBeVisible();
+    await expect(page.locator('#action-claim')).toBeVisible();
 
     // Claim
-    await page.click('text=Claim This Request');
+    await page.click('#action-claim');
 
     await page.waitForTimeout(1000);
     expect(claimCalled).toBe(true);
@@ -467,8 +467,8 @@ test.describe('Thread Actions', () => {
 
     // Open detail view and claim
     await page.click('.thread-row');
-    await expect(page.locator('text=Claim This Request')).toBeVisible();
-    await page.click('text=Claim This Request');
+    await expect(page.locator('#action-claim')).toBeVisible();
+    await page.click('#action-claim');
 
     // Wait for the API call to complete
     await page.waitForTimeout(1000);
