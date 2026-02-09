@@ -193,12 +193,12 @@ class MesseAf
 
     /**
      * Serialize thread to v2 directory format
+     * @param string $ref TRUSTED ref from API validation - NEVER use $envelope['ref'] for filenames
      * @return array Array of ['name' => string, 'content' => string, 'binary' => bool]
      */
-    public static function serializeThread(array $envelope, array $messages, array $existingAttachments = []): array
+    public static function serializeThread(string $ref, array $envelope, array $messages, array $existingAttachments = []): array
     {
         $files = [];
-        $ref = $envelope['ref'];
 
         // Create main file with envelope and messages
         $docs = array_merge([$envelope], $messages);

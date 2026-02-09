@@ -183,7 +183,8 @@ class Storage
         $dirPath = "{$basePath}/{$ref}";
         $this->ensureDir($dirPath);
 
-        $files = MesseAf::serializeThread($envelope, $messages, $attachments);
+        // SECURITY: Pass validated $ref to prevent path traversal via manipulated envelope
+        $files = MesseAf::serializeThread($ref, $envelope, $messages, $attachments);
 
         foreach ($files as $file) {
             $filePath = "{$dirPath}/{$file['name']}";
@@ -212,7 +213,8 @@ class Storage
 
         $this->ensureDir($dirPath);
 
-        $files = MesseAf::serializeThread($envelope, $messages, $attachments);
+        // SECURITY: Pass validated $ref to prevent path traversal via manipulated envelope
+        $files = MesseAf::serializeThread($ref, $envelope, $messages, $attachments);
 
         foreach ($files as $file) {
             $filePath = "{$dirPath}/{$file['name']}";
