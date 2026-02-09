@@ -2,6 +2,8 @@
 
 A PHP 8.x implementation of the MESS Exchange Server with git-backed storage.
 
+> **Deploying to production?** See [DEPLOYMENT.md](DEPLOYMENT.md) for Docker, VPS, Raspberry Pi, and shared hosting guides.
+
 ## Features
 
 - Serves the MESS client as static files
@@ -48,6 +50,14 @@ return [
 ```
 
 ## Running
+
+### Docker (Recommended)
+
+```bash
+docker compose up -d
+```
+
+Access the client at `http://localhost:8080/client/`
 
 ### Development Server
 
@@ -187,3 +197,39 @@ git pull origin main
 ```
 
 Set `git_push` to `true` in config to auto-push after commits.
+
+## Testing
+
+Run the test suite inside Docker:
+
+```bash
+docker compose up -d
+docker compose exec mess-php php /app/tests/api_test.php
+```
+
+Or locally with a running server:
+
+```bash
+php -S localhost:8080 -t public &
+php tests/api_test.php
+```
+
+The test suite includes 73 tests covering:
+- Health checks and CORS
+- Executor registration
+- Authentication and authorization
+- Request lifecycle (create, claim, complete)
+- Path traversal and injection attack prevention
+- Input validation and edge cases
+
+## Security
+
+The server implements several security measures:
+
+- **Path traversal prevention**: Thread refs are validated against a strict pattern
+- **Input validation**: All user input is sanitized before use
+- **Bearer token authentication**: API keys are hashed with SHA-256
+- **CORS headers**: Configurable cross-origin access
+- **Git audit trail**: All changes are tracked in git history
+
+For production deployment security, see [DEPLOYMENT.md](DEPLOYMENT.md#security-hardening).

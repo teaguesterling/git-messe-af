@@ -314,7 +314,35 @@ MESS supports multiple deployment modes depending on your needs:
 
 Use GitHub as your backend — this is the default approach described above. No server to host, works with the static web client.
 
-### Option 2: Exchange Server (Multi-User / Scalable)
+### Option 2: PHP Server (Lightweight Self-Hosted)
+
+For a simple self-hosted setup without external dependencies, use the PHP server:
+
+```bash
+cd php-server
+docker compose up -d
+```
+
+Access at: `http://localhost:8080/client/`
+
+**Features:**
+- Single container, no external database
+- Git-backed storage with full audit trail
+- Works on Raspberry Pi, VPS, or any Docker host
+- Automatic local mode detection in the client
+
+**Quick setup without Docker:**
+
+```bash
+cd php-server
+composer install
+cp config.example.php config.php
+php -S localhost:8080 -t public
+```
+
+See [`php-server/README.md`](php-server/README.md) for API reference and [`php-server/DEPLOYMENT.md`](php-server/DEPLOYMENT.md) for production deployment guides.
+
+### Option 3: Node.js Exchange Server (Multi-User / Scalable)
 
 For teams, advanced deployments, or when you don't want to use GitHub, deploy the Exchange Server:
 
@@ -355,7 +383,7 @@ npm run worker:deploy
 
 See [`server/README.md`](server/README.md) for full API reference, storage options, and deployment details.
 
-### Option 3: Local Files Only (Offline)
+### Option 4: Local Files Only (Offline)
 
 For a completely local setup (no network required):
 
