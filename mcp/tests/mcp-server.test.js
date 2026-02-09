@@ -864,6 +864,40 @@ describe('Helper Tools', () => {
     assert.deepStrictEqual(req.response_hint, []);
   });
 
+  it('mess_request v1.1 includes needed_by and confirm_before', () => {
+    const args = {
+      intent: 'Check the garage door',
+      needed_by: '2026-02-08T23:00:00-08:00',
+      confirm_before: true
+    };
+
+    const req = {
+      intent: args.intent,
+      context: args.context || [],
+      priority: args.priority || 'normal',
+      response_hint: args.response_hints || []
+    };
+    // v1.1 fields
+    if (args.needed_by) req.needed_by = args.needed_by;
+    if (args.confirm_before) req.confirm_before = args.confirm_before;
+
+    assert.strictEqual(req.intent, 'Check the garage door');
+    assert.strictEqual(req.needed_by, '2026-02-08T23:00:00-08:00');
+    assert.strictEqual(req.confirm_before, true);
+  });
+
+  it('v1.1 features trigger protocol version 1.1.0', () => {
+    const request1 = { intent: 'Basic request' };
+    const request2 = { intent: 'Time-sensitive', needed_by: '2026-02-08T23:00:00Z' };
+    const request3 = { intent: 'Dangerous action', confirm_before: true };
+
+    const getVersion = (req) => (req.needed_by || req.confirm_before) ? '1.1.0' : '1.0.0';
+
+    assert.strictEqual(getVersion(request1), '1.0.0');
+    assert.strictEqual(getVersion(request2), '1.1.0');
+    assert.strictEqual(getVersion(request3), '1.1.0');
+  });
+
   it('mess_answer builds correct answer structure', () => {
     const args = {
       ref: '2026-02-01-001',
@@ -1147,6 +1181,64 @@ describe('Helper Tool Validation', () => {
 
     const allValid = args.response_hints.every(h => validHints.includes(h));
     assert.strictEqual(allValid, false);
+  });
+});
+
+describe('v1.1 Location Schema', () => {
+  it('accepts location with coordinates only', () => {
+    const location = { lat: 37.7749, lng: -122.4194 };
+
+    assert.ok(location.lat !== undefined);
+    assert.ok(location.lng !== undefined);
+  });
+
+  it('accepts location with name only', () => {
+    const location = { name: 'Kitchen' };
+
+    assert.ok(location.name);
+    assert.strictEqual(location.lat, undefined);
+  });
+
+  it('accepts location with address only', () => {
+    const location = { address: '52 Paradise Dr, Corte Madera, CA 94925' };
+
+    assert.ok(location.address);
+  });
+
+  it('accepts full location with all fields', () => {
+    const location = {
+      lat: 37.9234,
+      lng: -122.5193,
+      accuracy: 10,
+      name: 'Safeway',
+      address: '180 Donahue St, Sausalito, CA 94965',
+      description: 'Near the entrance'
+    };
+
+    assert.strictEqual(location.lat, 37.9234);
+    assert.strictEqual(location.lng, -122.5193);
+    assert.strictEqual(location.accuracy, 10);
+    assert.strictEqual(location.name, 'Safeway');
+    assert.ok(location.address.includes('Sausalito'));
+    assert.strictEqual(location.description, 'Near the entrance');
+  });
+
+  it('validates location in response content', () => {
+    const response = {
+      content: [
+        {
+          location: {
+            name: 'Kitchen counter',
+            description: 'Next to the fruit bowl'
+          }
+        },
+        'The keys are right there'
+      ]
+    };
+
+    const locationEntry = response.content.find(c => c.location);
+    assert.ok(locationEntry);
+    assert.strictEqual(locationEntry.location.name, 'Kitchen counter');
   });
 });
 

@@ -800,6 +800,10 @@ async function createRequest(from, request) {
   const ref = await generateRef();
   const now = new Date().toISOString();
 
+  // Determine protocol version based on features used
+  const usesV11 = request.needed_by || request.confirm_before;
+  const protocolVersion = usesV11 ? '1.1.0' : '1.0.0';
+
   const envelope = {
     ref,
     requestor: from,
@@ -812,8 +816,12 @@ async function createRequest(from, request) {
     history: [{ action: 'created', at: now, by: from }]
   };
 
+  // v1.1 envelope fields
+  if (request.needed_by) envelope.needed_by = request.needed_by;
+  if (request.confirm_before) envelope.confirm_before = request.confirm_before;
+
   const messages = [
-    { from, received: now, channel: 'mcp', MESS: [{ v: '1.0.0' }, { request }] },
+    { from, received: now, channel: 'mcp', MESS: [{ v: protocolVersion }, { request }] },
     { from: 'exchange', received: now, MESS: [{ ack: { re: 'last', ref } }] }
   ];
 
@@ -1253,7 +1261,7 @@ Specify response_hints to tell the executor what you need back:
 - image: photo of something
 - video: recording
 - audio: voice message or sound
-- location: GPS coordinates
+- location: coordinates and/or place name (e.g., {lat, lng, name, address})
 - file: document or data file
 - text: written description
 - confirmation: simple yes/no acknowledgment
@@ -1276,7 +1284,15 @@ Returns the ref for tracking with mess_wait/mess_status.`,
           response_hints: {
             type: 'array',
             items: { type: 'string', enum: ['text', 'image', 'video', 'audio', 'location', 'file', 'confirmation'] },
-            description: 'What kind of response you need. text=written answer, image=photo, video=recording, audio=voice/sound, location=GPS coordinates, file=document/data, confirmation=yes/no acknowledgment'
+            description: 'What kind of response you need. text=written answer, image=photo, video=recording, audio=voice/sound, location=GPS coordinates and/or place name, file=document/data, confirmation=yes/no acknowledgment'
+          },
+          needed_by: {
+            type: 'string',
+            description: 'ISO 8601 datetime when request becomes stale (e.g., "2026-02-08T23:00:00-08:00"). Request may auto-expire if not claimed by this time.'
+          },
+          confirm_before: {
+            type: 'boolean',
+            description: 'If true, executor must get confirmation before proceeding. Use for consequential or irreversible actions.'
           }
         },
         required: ['intent']
@@ -1422,6 +1438,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         priority: args.priority || 'normal',
         response_hint: args.response_hints || []
       };
+      // v1.1 fields
+      if (args.needed_by) req.needed_by = args.needed_by;
+      if (args.confirm_before) req.confirm_before = args.confirm_before;
+
       const result = await createRequest(AGENT_ID, req);
       return { content: [{ type: 'text', text: YAML.stringify(result) }] };
     }
