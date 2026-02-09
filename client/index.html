@@ -1472,7 +1472,8 @@
     function startPeriodicSync() {
       if (state.syncInterval) clearInterval(state.syncInterval);
       state.syncInterval = setInterval(async () => {
-        if (!state.github || state.view !== 'main') return;
+        // Skip sync while viewing thread detail (to avoid clearing input state)
+        if (!state.github || state.view !== 'main' || state.selectedThread) return;
         const previousThreads = JSON.stringify(state.threads.executing);
         await refresh();
         const currentThreads = JSON.stringify(state.threads.executing);
@@ -1511,7 +1512,7 @@
           if (item.status?.code === 'needs_input' && item.status?.executor === executorId) {
             foundNeedsInput = true;
           }
-          if (foundNeedsInput && item.reply) {
+          if (foundNeedsInput && (item.reply || item.answer)) {
             return true;
           }
         }
@@ -2254,9 +2255,13 @@
           <!-- Actions -->
           <div class="p-4 border-t bg-card">
             ${canClaim ? `
-              <div class="flex gap-3">
-                <button id="action-claim" class="btn btn-primary flex-1">👋 Claim This Request</button>
-                <button id="action-decline" class="btn btn-secondary">Decline</button>
+              <div class="space-y-3">
+                <input type="text" id="response-text" placeholder="Ask a question before claiming..." class="input w-full">
+                <div class="flex gap-3">
+                  <button id="action-claim" class="btn btn-primary flex-1">👋 Claim</button>
+                  <button id="action-needs-input-unclaimed" class="btn btn-secondary flex-1">❓ Need Info</button>
+                  <button id="action-decline" class="btn btn-ghost border">Decline</button>
+                </div>
               </div>
             ` : ''}
             
@@ -2319,17 +2324,20 @@
                     <button id="remove-file" class="text-red text-sm">Remove</button>
                   </div>
                 </div>
-                <div class="flex gap-2">
+                <div id="main-actions" class="flex gap-2">
                   <button id="action-complete" class="btn btn-primary flex-1">✓ Complete</button>
-                  <button id="action-more" class="btn btn-secondary">More</button>
+                  <button id="action-more" class="btn btn-secondary">More ▼</button>
                 </div>
-                <div id="more-actions" class="hidden flex gap-2 pt-2 border-t animate-fade">
-                  <button id="action-needs-input" class="flex-1 text-sm py-2 px-4 border-2 border-purple text-purple rounded-xl" style="background:transparent">
-                    Need Info
-                  </button>
-                  <button id="action-failed" class="flex-1 text-sm py-2 px-4 border-2 border-red text-red rounded-xl" style="background:transparent">
-                    Can't Do
-                  </button>
+                <div id="more-actions" class="hidden space-y-2 pt-2 border-t animate-fade">
+                  <div class="flex gap-2">
+                    <button id="action-needs-input" class="flex-1 text-sm py-2 px-4 border-2 border-purple text-purple rounded-xl" style="background:transparent">
+                      Need Info
+                    </button>
+                    <button id="action-failed" class="flex-1 text-sm py-2 px-4 border-2 border-red text-red rounded-xl" style="background:transparent">
+                      Can't Do
+                    </button>
+                  </div>
+                  <button id="action-back-to-main" class="w-full text-sm py-2 text-muted">▲ Back</button>
                 </div>
               </div>
             ` : ''}
@@ -2450,6 +2458,12 @@
                     }
                     return '';
                   }).join('') || ''}
+                </div>
+              ` : ''}
+              ${content.answer ? `
+                <div class="space-y-2">
+                  <p class="text-xs text-muted flex items-center gap-1"><span>💬</span> Answer to question</p>
+                  <p class="text-sm text-secondary">${content.answer.value || content.answer.text || ''}</p>
                 </div>
               ` : ''}
             </div>
@@ -2757,10 +2771,18 @@
 
       document.getElementById('action-claim')?.addEventListener('click', () => handleAction('claim'));
       document.getElementById('action-decline')?.addEventListener('click', () => handleAction('decline'));
+      document.getElementById('action-needs-input-unclaimed')?.addEventListener('click', () => handleAction('needs_input_unclaimed'));
       document.getElementById('action-complete')?.addEventListener('click', () => handleAction('complete'));
       document.getElementById('action-failed')?.addEventListener('click', () => handleAction('failed'));
       document.getElementById('action-needs-input')?.addEventListener('click', () => handleAction('needs_input'));
-      document.getElementById('action-more')?.addEventListener('click', () => document.getElementById('more-actions')?.classList.toggle('hidden'));
+      document.getElementById('action-more')?.addEventListener('click', () => {
+        document.getElementById('main-actions')?.classList.add('hidden');
+        document.getElementById('more-actions')?.classList.remove('hidden');
+      });
+      document.getElementById('action-back-to-main')?.addEventListener('click', () => {
+        document.getElementById('more-actions')?.classList.add('hidden');
+        document.getElementById('main-actions')?.classList.remove('hidden');
+      });
       
       document.getElementById('photo-input')?.addEventListener('change', async (e) => {
         const file = e.target.files?.[0];
@@ -3190,7 +3212,20 @@
       }
       else if (action === 'failed') { mess = [{ status: { re: ref, code: 'failed' } }]; newStatus = 'failed'; }
       else if (action === 'decline') { mess = [{ status: { re: ref, code: 'declined' } }]; newStatus = 'declined'; }
-      else if (action === 'needs_input') { mess = [{ status: { re: ref, code: 'needs_input', message: 'Need more information' } }]; newStatus = 'needs_input'; }
+      else if (action === 'needs_input') {
+        const question = responseText || 'Need more information';
+        mess = [{ status: { re: ref, code: 'needs_input', message: question } }];
+        newStatus = 'needs_input';
+      }
+      else if (action === 'needs_input_unclaimed') {
+        // Claim and request info in one action
+        const question = responseText || 'Need more information';
+        mess = [
+          { status: { re: ref, code: 'claimed' } },
+          { status: { re: ref, code: 'needs_input', message: question } }
+        ];
+        newStatus = 'needs_input';
+      }
 
       // Optimistically update local state before API call
       const oldFolder = state.currentFolder;
