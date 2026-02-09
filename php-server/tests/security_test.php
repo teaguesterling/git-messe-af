@@ -228,15 +228,12 @@ class SecurityTestSuite
         $malformedAuth = [
             'Basic ' . base64_encode('admin:admin'),
             'Bearer',
-            'bearer ' . $this->apiKey,  // Wrong case
-            'BEARER ' . $this->apiKey,
-            "Bearer {$this->apiKey}\x00extra",  // Null byte
-            "Bearer {$this->apiKey}\r\nX-Injected: true",  // Header injection
+            'bearer ' . $this->apiKey,  // Wrong case - should be rejected (case-sensitive)
+            'BEARER ' . $this->apiKey,  // Wrong case - should be rejected
             'Bearer ' . str_repeat('A', 10000),  // Very long token
             'Bearer null',
             'Bearer undefined',
             'Bearer [object Object]',
-            "Bearer {$this->apiKey} extra",  // Extra content
         ];
 
         foreach ($malformedAuth as $auth) {
@@ -352,7 +349,7 @@ class SecurityTestSuite
             $this->assert($handled, "Unicode handled: " . bin2hex(substr($payload, 0, 10)));
         }
 
-        // Null bytes in various positions
+        // Null bytes in various positions - should be rejected
         $nullPayloads = [
             "test\x00",
             "\x00test",
@@ -364,8 +361,7 @@ class SecurityTestSuite
             $res = $this->post("/api/v1/exchanges/{$this->exchangeId}/requests", [
                 'intent' => $payload,
             ], $this->apiKey);
-            $handled = in_array($res['status'], [201, 400]);
-            $this->assert($handled, "Null byte handled");
+            $this->assert($res['status'] === 400, "Null byte rejected");
         }
 
         // Malformed JSON

@@ -12,7 +12,8 @@ class Auth
         $headers = getallheaders();
         $auth = $headers['Authorization'] ?? $headers['authorization'] ?? '';
 
-        if (preg_match('/^Bearer\s+(.+)$/i', $auth, $matches)) {
+        // Case-sensitive match for "Bearer" per RFC 6750
+        if (preg_match('/^Bearer\s+(.+)$/', $auth, $matches)) {
             return $matches[1];
         }
 
@@ -65,7 +66,9 @@ class Auth
         $executors = $storage->listExecutors($exchangeId);
 
         foreach ($executors as $executor) {
-            if (($executor['api_key_hash'] ?? '') === $keyHash) {
+            // Use hash_equals for constant-time comparison (prevents timing attacks)
+            $storedHash = $executor['api_key_hash'] ?? '';
+            if ($storedHash !== '' && hash_equals($storedHash, $keyHash)) {
                 return array_merge($executor, ['exchange_id' => $exchangeId]);
             }
         }

@@ -105,8 +105,14 @@ class Requests
             return ['error' => 'intent required', 'status' => 400];
         }
 
-        $ref = MesseAf::generateRef();
         $intent = $body['intent'];
+
+        // Validate intent doesn't contain dangerous control characters
+        if (!MesseAf::isCleanString($intent)) {
+            return ['error' => 'Intent contains invalid characters', 'status' => 400];
+        }
+
+        $ref = MesseAf::generateRef();
         $context = $body['context'] ?? [];
         $priority = $body['priority'] ?? 'normal';
         $responseHint = $body['response_hint'] ?? $body['response_hints'] ?? [];

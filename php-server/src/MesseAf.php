@@ -69,6 +69,30 @@ class MesseAf
     }
 
     /**
+     * Check if a string contains control characters (null bytes, etc.)
+     * Returns true if the string is safe (no control chars except newlines/tabs)
+     */
+    public static function isCleanString(string $str): bool
+    {
+        // Reject null bytes and most control characters
+        // Allow \t (0x09), \n (0x0A), \r (0x0D) for formatted text
+        if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $str)) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Sanitize a string by removing control characters
+     */
+    public static function sanitizeString(string $str): string
+    {
+        // Remove null bytes and other dangerous control characters
+        // Preserve \t, \n, \r for formatted text
+        return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $str);
+    }
+
+    /**
      * Generate a new thread reference
      * Format: YYYY-MM-DD-XXXX (4 random alphanumeric)
      */
