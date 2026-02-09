@@ -1416,10 +1416,195 @@
       }
     }
 
+    // ============ Local API Exchange Client ============
+    // Used when served from the PHP server (or any local REST API server)
+    class LocalApiExchange {
+      constructor(baseUrl, token, exchangeId) {
+        this.baseUrl = baseUrl.replace(/\/$/, '');  // Remove trailing slash
+        this.token = token;
+        this.exchangeId = exchangeId;
+      }
+
+      invalidateTreeCache() {
+        // No caching in local API mode
+      }
+
+      async request(path, options = {}) {
+        const res = await fetch(`${this.baseUrl}${path}`, {
+          ...options,
+          headers: {
+            'Authorization': `Bearer ${this.token}`,
+            'Content-Type': 'application/json',
+            ...options.headers
+          }
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || `API error: ${res.status}`);
+        }
+        return res.json();
+      }
+
+      async testConnection() {
+        const res = await fetch(`${this.baseUrl}/health`);
+        if (!res.ok) throw new Error('Server not available');
+        const data = await res.json();
+        return { name: `${data.service} (${data.exchange_id})`, private: true, permissions: { push: true } };
+      }
+
+      async listThreads() {
+        const data = await this.request(`/api/v1/exchanges/${this.exchangeId}/requests`);
+        const threads = data.threads || [];
+
+        // Group by folder
+        const results = { received: [], executing: [], finished: [], canceled: [] };
+        for (const t of threads) {
+          const folder = this.getFolder(t.status);
+          // Build thread object compatible with GitHubExchange format
+          const thread = {
+            ref: t.ref,
+            requestor: t.requestor_id,
+            executor: t.executor_id,
+            status: t.status,
+            created: t.created_at,
+            updated: t.updated_at,
+            intent: t.intent,
+            priority: t.priority,
+            envelope: {
+              ref: t.ref,
+              requestor: t.requestor_id,
+              executor: t.executor_id,
+              status: t.status,
+              created: t.created_at,
+              updated: t.updated_at,
+              intent: t.intent,
+              priority: t.priority,
+            },
+            messages: [],  // Will be loaded on demand
+            attachments: [],
+            _format: 'api'
+          };
+          results[folder].push(thread);
+        }
+
+        // Sort by updated time (newest first)
+        for (const folder of Object.keys(results)) {
+          results[folder].sort((a, b) => new Date(b.updated) - new Date(a.updated));
+        }
+
+        return results;
+      }
+
+      async getThread(ref) {
+        const data = await this.request(`/api/v1/exchanges/${this.exchangeId}/requests/${ref}`);
+        const t = data.thread;
+        return {
+          ref: t.ref,
+          requestor: t.requestor_id,
+          executor: t.executor_id,
+          status: t.status,
+          created: t.created_at,
+          updated: t.updated_at,
+          intent: t.intent,
+          priority: t.priority,
+          envelope: {
+            ref: t.ref,
+            requestor: t.requestor_id,
+            executor: t.executor_id,
+            status: t.status,
+            created: t.created_at,
+            updated: t.updated_at,
+            intent: t.intent,
+            priority: t.priority,
+          },
+          messages: (t.messages || []).map(m => ({
+            from: m.from,
+            received: m.ts,
+            MESS: m.mess
+          })),
+          attachments: [],
+          _format: 'api'
+        };
+      }
+
+      async createRequest(from, request) {
+        const data = await this.request(`/api/v1/exchanges/${this.exchangeId}/requests`, {
+          method: 'POST',
+          body: JSON.stringify({
+            intent: request.intent,
+            context: request.context,
+            priority: request.priority,
+            response_hints: request.response_hint
+          })
+        });
+        return { ref: data.ref, status: data.status };
+      }
+
+      async updateThread(thread, from, mess, newStatus = null) {
+        const body = {};
+        if (newStatus) body.status = newStatus;
+        if (mess) body.mess = mess;
+
+        const data = await this.request(`/api/v1/exchanges/${this.exchangeId}/requests/${thread.ref}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body)
+        });
+
+        // Return updated envelope
+        return {
+          ...thread.envelope,
+          status: data.status,
+          updated: new Date().toISOString()
+        };
+      }
+
+      getFolder(status) {
+        const map = {
+          pending: 'received', claimed: 'executing', 'in-progress': 'executing',
+          waiting: 'executing', held: 'executing', needs_input: 'executing',
+          completed: 'finished', partial: 'finished',
+          failed: 'canceled', declined: 'canceled', cancelled: 'canceled', expired: 'canceled'
+        };
+        return map[status] || 'received';
+      }
+
+      async registerExecutor(config) {
+        await this.request(`/api/v1/exchanges/${this.exchangeId}/executors/${config.executor_id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            display_name: config.display_name,
+            capabilities: config.capabilities
+          })
+        });
+      }
+
+      async getExchangeCapabilities() {
+        // TODO: Implement capabilities endpoint
+        return [];
+      }
+    }
+
+    // ============ API Mode Detection ============
+    function isLocalApiMode() {
+      // Detect if we're being served from a local server (not GitHub Pages)
+      const hostname = window.location.hostname;
+      const isGitHubPages = hostname.endsWith('.github.io');
+      const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.');
+      const hasLocalConfig = localStorage.getItem('mess-local-mode') === 'true';
+
+      return !isGitHubPages && (isLocalhost || hasLocalConfig);
+    }
+
+    function getApiBaseUrl() {
+      // When in local mode, API is on the same origin
+      return window.location.origin;
+    }
+
     // ============ App State ============
     const state = {
       config: JSON.parse(localStorage.getItem('mess-executor-config') || 'null'),
       github: null,
+      isLocalMode: isLocalApiMode(),
       threads: { received: [], executing: [], finished: [], canceled: [] },
       currentFolder: 'received',
       selectedThread: null,
@@ -1454,7 +1639,17 @@
     };
 
     function init() {
-      if (state.config?.token && state.config?.repo && state.config?.executorId) {
+      // Check for local API mode first
+      if (state.isLocalMode && state.config?.token && state.config?.executorId) {
+        // Local API mode - use LocalApiExchange
+        const baseUrl = getApiBaseUrl();
+        const exchangeId = state.config.exchangeId || 'home';
+        state.github = new LocalApiExchange(baseUrl, state.config.token, exchangeId);
+        state.view = 'main';
+        render();
+        refresh();
+        startPeriodicSync();
+      } else if (state.config?.token && state.config?.repo && state.config?.executorId) {
         const [owner, repo] = state.config.repo.split('/');
         state.github = new GitHubExchange(owner, repo, state.config.token);
         state.view = 'main';
@@ -1618,13 +1813,38 @@
     }
 
     function renderSetupStep1() {
+      // In local mode, show simplified setup
+      if (state.isLocalMode) {
+        return `
+          <div class="space-y-6">
+            <div>
+              <h2 class="text-2xl font-bold text-primary">Local Server Detected</h2>
+              <p class="text-secondary mt-2">You're running MESS on a local server. Register as an executor to get started.</p>
+            </div>
+
+            <div class="bg-mess-light rounded-2xl p-5 border border-mess">
+              <h3 class="font-semibold text-mess mb-3 flex items-center gap-2">
+                <span>🏠</span> Local Mode
+              </h3>
+              <p class="text-sm text-secondary">
+                Your MESS server is running at <code class="mono bg-hover px-1 rounded">${window.location.origin}</code>
+              </p>
+            </div>
+
+            <button id="next-step" class="btn btn-primary w-full">
+              Register as Executor →
+            </button>
+          </div>
+        `;
+      }
+
       return `
         <div class="space-y-6">
           <div>
             <h2 class="text-2xl font-bold text-primary">Create a GitHub Token</h2>
             <p class="text-secondary mt-2">You'll need a Personal Access Token to connect to your exchange repository.</p>
           </div>
-          
+
           <div class="bg-mess-light rounded-2xl p-5 border border-mess">
             <h3 class="font-semibold text-mess mb-3 flex items-center gap-2">
               <span>📋</span> Quick Setup
@@ -1636,12 +1856,12 @@
               <li class="flex gap-2"><span class="mono bg-hover px-1 rounded">4</span> Permissions → Contents: <strong>Read and write</strong></li>
             </ol>
           </div>
-          
+
           <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" class="btn btn-secondary w-full">
             <svg style="width:1.25rem;height:1.25rem" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
             Open GitHub Settings
           </a>
-          
+
           <button id="next-step" class="btn btn-primary w-full">
             I have my token →
           </button>
@@ -1650,13 +1870,68 @@
     }
 
     function renderSetupStep2() {
+      // In local mode, show executor registration form
+      if (state.isLocalMode) {
+        return `
+          <div class="space-y-6">
+            <div>
+              <h2 class="text-2xl font-bold text-primary">Register as Executor</h2>
+              <p class="text-secondary mt-2">Enter an executor ID to register with the local server.</p>
+            </div>
+
+            <div class="space-y-4">
+              <div>
+                <label class="text-sm font-medium text-secondary mb-2" style="display:block">Executor ID</label>
+                <input type="text" id="input-local-executor-id" value="${state.config?.executorId || ''}"
+                  placeholder="e.g., my-phone" class="input">
+                <p class="text-xs text-muted mt-1">A unique name for this device</p>
+              </div>
+
+              <div>
+                <label class="text-sm font-medium text-secondary mb-2" style="display:block">Exchange ID</label>
+                <input type="text" id="input-exchange-id" value="${state.config?.exchangeId || 'home'}"
+                  placeholder="home" class="input">
+                <p class="text-xs text-muted mt-1">Usually "home" - must match server config</p>
+              </div>
+            </div>
+
+            ${state.error ? `
+              <div class="bg-red-light border border-red rounded-xl p-4 animate-fade">
+                <p class="text-red text-sm flex items-center gap-2">
+                  <span>⚠️</span> ${state.error}
+                </p>
+              </div>
+            ` : ''}
+
+            ${state.connectionTest ? `
+              <div class="bg-mess-light border border-mess rounded-xl p-4 animate-fade">
+                <p class="text-mess font-medium flex items-center gap-2">
+                  <span>✓</span> Registered successfully!
+                </p>
+                <p class="text-secondary text-sm mt-1 mono">${state.connectionTest.message || ''}</p>
+              </div>
+            ` : ''}
+
+            <div class="flex gap-3">
+              <button id="prev-step" class="btn btn-secondary flex-1">← Back</button>
+              <button id="register-local" class="btn btn-secondary flex-1 ${state.loading ? 'loading' : ''}">
+                ${state.loading ? 'Registering...' : 'Register'}
+              </button>
+              <button id="next-step" ${!state.connectionTest ? 'disabled' : ''} class="btn btn-primary flex-1">
+                Next →
+              </button>
+            </div>
+          </div>
+        `;
+      }
+
       return `
         <div class="space-y-6">
           <div>
             <h2 class="text-2xl font-bold text-primary">Connect Your Repository</h2>
             <p class="text-secondary mt-2">Enter your token and repository details.</p>
           </div>
-          
+
           <div class="space-y-4">
             <div>
               <label class="text-sm font-medium text-secondary mb-2" style="display:block">GitHub Token</label>
@@ -1664,14 +1939,14 @@
                 placeholder="github_pat_xxxxx or ghp_xxxxx" class="input mono text-sm">
               <p class="text-xs text-muted mt-1">🔒 Stored locally in your browser only</p>
             </div>
-            
+
             <div>
               <label class="text-sm font-medium text-secondary mb-2" style="display:block">Repository</label>
               <input type="text" id="input-repo" value="${state.config?.repo || ''}"
                 placeholder="username/mess-exchange" class="input">
             </div>
           </div>
-          
+
           ${state.error ? `
             <div class="bg-red-light border border-red rounded-xl p-4 animate-fade">
               <p class="text-red text-sm flex items-center gap-2">
@@ -1679,7 +1954,7 @@
               </p>
             </div>
           ` : ''}
-          
+
           ${state.connectionTest ? `
             <div class="bg-mess-light border border-mess rounded-xl p-4 animate-fade">
               <p class="text-mess font-medium flex items-center gap-2">
@@ -1691,7 +1966,7 @@
               </p>
             </div>
           ` : ''}
-          
+
           <div class="flex gap-3">
             <button id="prev-step" class="btn btn-secondary flex-1">← Back</button>
             <button id="test-connection" class="btn btn-secondary flex-1 ${state.loading ? 'loading' : ''}">
@@ -2547,11 +2822,11 @@
         if (!token || !repo) { state.error = 'Please enter both token and repository'; render(); return; }
         const [owner, repoName] = repo.split('/');
         if (!owner || !repoName) { state.error = 'Repository format: username/repo-name'; render(); return; }
-        
+
         state.loading = true; state.error = null; state.connectionTest = null;
         state.config = { ...state.config, token, repo };
         render();
-        
+
         try {
           const github = new GitHubExchange(owner, repoName, token);
           state.connectionTest = await github.testConnection();
@@ -2559,7 +2834,46 @@
         state.loading = false;
         render();
       });
-      
+
+      // Local mode: register executor with local server
+      document.getElementById('register-local')?.addEventListener('click', async () => {
+        const executorId = document.getElementById('input-local-executor-id').value.trim();
+        const exchangeId = document.getElementById('input-exchange-id').value.trim() || 'home';
+        if (!executorId) { state.error = 'Please enter an executor ID'; render(); return; }
+
+        state.loading = true; state.error = null; state.connectionTest = null;
+        render();
+
+        try {
+          const baseUrl = getApiBaseUrl();
+          const res = await fetch(`${baseUrl}/api/v1/exchanges/${exchangeId}/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ executor_id: executorId })
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error || `Registration failed: ${res.status}`);
+          }
+
+          // Save the API key and config
+          state.config = {
+            ...state.config,
+            token: data.api_key,
+            executorId: data.executor_id,
+            exchangeId: exchangeId
+          };
+          localStorage.setItem('mess-executor-config', JSON.stringify(state.config));
+
+          state.connectionTest = { message: 'Save your API key: ' + data.api_key };
+        } catch (e) {
+          state.error = e.message;
+        }
+        state.loading = false;
+        render();
+      });
+
       document.getElementById('finish-setup')?.addEventListener('click', async () => {
         const executorId = document.getElementById('input-executor-id').value.trim();
         const displayName = document.getElementById('input-display-name').value.trim();
@@ -2569,22 +2883,38 @@
         const capabilities = [...new Set([...predefinedCaps, ...customCaps])];
 
         if (!executorId) { state.error = 'Please enter an executor name'; render(); return; }
-        
+
         state.config = { ...state.config, executorId, displayName: displayName || executorId, canRequest, capabilities };
         localStorage.setItem('mess-executor-config', JSON.stringify(state.config));
-        
-        const [owner, repo] = state.config.repo.split('/');
-        state.github = new GitHubExchange(owner, repo, state.config.token);
-        
+
         state.loading = true; render();
-        try {
-          await state.github.registerExecutor({
-            executor_id: executorId, display_name: displayName || executorId, capabilities,
-            notifications: [], preferences: { min_priority: 'normal', quiet_hours: { enabled: false } }
-          });
-        } catch (e) { console.log('Registration note:', e.message); }
-        
+
+        if (state.isLocalMode) {
+          // Local mode: use LocalApiExchange
+          const baseUrl = getApiBaseUrl();
+          const exchangeId = state.config.exchangeId || 'home';
+          state.github = new LocalApiExchange(baseUrl, state.config.token, exchangeId);
+
+          try {
+            await state.github.registerExecutor({
+              executor_id: executorId, display_name: displayName || executorId, capabilities
+            });
+          } catch (e) { console.log('Registration note:', e.message); }
+        } else {
+          // GitHub mode: use GitHubExchange
+          const [owner, repo] = state.config.repo.split('/');
+          state.github = new GitHubExchange(owner, repo, state.config.token);
+
+          try {
+            await state.github.registerExecutor({
+              executor_id: executorId, display_name: displayName || executorId, capabilities,
+              notifications: [], preferences: { min_priority: 'normal', quiet_hours: { enabled: false } }
+            });
+          } catch (e) { console.log('Registration note:', e.message); }
+        }
+
         state.loading = false; state.view = 'main'; render(); refresh();
+        startPeriodicSync();
       });
     }
 

@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  mess-php:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount client for serving static files
+      - ../client:/app/../client:ro
+      # Persist data directory (optional - remove for ephemeral testing)
+      - ./data:/app/data
+    environment:
+      - PHP_CLI_SERVER_WORKERS=4
