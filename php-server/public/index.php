@@ -9,10 +9,18 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 use MesseAf\Auth;
 use MesseAf\Config;
+use MesseAf\MesseAf;
 use MesseAf\Storage;
 use MesseAf\Handlers\Health;
 use MesseAf\Handlers\Executors;
 use MesseAf\Handlers\Requests;
+
+// ============ Security Headers ============
+
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('X-XSS-Protection: 1; mode=block');
+header('Referrer-Policy: strict-origin-when-cross-origin');
 
 // ============ CORS Headers ============
 
@@ -155,6 +163,11 @@ if (preg_match('#^/api/v1/exchanges/([^/]+)(.*)$#', $uri, $matches)) {
     $exchangeId = $matches[1];
     $path = $matches[2] ?: '';
 
+    // Validate exchange ID format early to prevent path traversal
+    if (!MesseAf::isValidExchangeId($exchangeId)) {
+        errorResponse('Invalid exchange ID', 400);
+    }
+
     $executorsHandler = new Executors($storage);
     $requestsHandler = new Requests($storage);
 
@@ -222,8 +235,10 @@ if (preg_match('#^/api/v1/exchanges/([^/]+)(.*)$#', $uri, $matches)) {
             errorResponse($result['error'], $result['status']);
         }
         // Return binary content for attachments
+        // Sanitize filename for Content-Disposition header
+        $safeFilename = preg_replace('/[^a-zA-Z0-9._-]/', '_', $filename);
         header('Content-Type: application/octet-stream');
-        header("Content-Disposition: attachment; filename=\"{$filename}\"");
+        header("Content-Disposition: attachment; filename=\"{$safeFilename}\"");
         echo base64_decode($result['data']['content']);
         exit;
     }

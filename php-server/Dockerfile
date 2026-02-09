@@ -6,6 +6,9 @@ RUN apt-get update && apt-get install -y git unzip && rm -rf /var/lib/apt/lists/
 # Install composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
+# Create non-root user for security
+RUN useradd -m -s /bin/bash mess
+
 WORKDIR /app
 
 # Copy composer files first for better caching
@@ -24,6 +27,12 @@ RUN cd data && git init && git config user.email "mess@local" && git config user
 
 # Copy example config
 RUN cp config.example.php config.php
+
+# Set ownership to non-root user
+RUN chown -R mess:mess /app
+
+# Switch to non-root user
+USER mess
 
 EXPOSE 8080
 

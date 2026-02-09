@@ -3,6 +3,7 @@
 namespace MesseAf\Handlers;
 
 use MesseAf\Auth;
+use MesseAf\MesseAf;
 use MesseAf\Storage;
 
 class Executors
@@ -20,11 +21,22 @@ class Executors
      */
     public function register(string $exchangeId, array $body): array
     {
+        // Validate exchange ID
+        if (!MesseAf::isValidExchangeId($exchangeId)) {
+            return ['error' => 'Invalid exchange ID', 'status' => 400];
+        }
+
         if (empty($body['executor_id'])) {
             return ['error' => 'executor_id required', 'status' => 400];
         }
 
         $executorId = $body['executor_id'];
+
+        // Validate executor ID
+        if (!MesseAf::isValidExecutorId($executorId)) {
+            return ['error' => 'Invalid executor_id. Use alphanumeric characters, hyphens, and underscores only (1-64 chars)', 'status' => 400];
+        }
+
         $existing = $this->storage->getExecutor($exchangeId, $executorId);
 
         if ($existing !== null) {
@@ -90,6 +102,11 @@ class Executors
      */
     public function update(array $auth, string $executorId, array $body): array
     {
+        // Validate executor ID
+        if (!MesseAf::isValidExecutorId($executorId)) {
+            return ['error' => 'Invalid executor_id', 'status' => 400];
+        }
+
         if ($auth['id'] !== $executorId) {
             return ['error' => 'Can only update your own profile', 'status' => 403];
         }

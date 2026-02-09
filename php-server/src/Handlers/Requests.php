@@ -111,6 +111,11 @@ class Requests
         $priority = $body['priority'] ?? 'normal';
         $responseHint = $body['response_hint'] ?? $body['response_hints'] ?? [];
 
+        // Validate priority
+        if (!MesseAf::isValidPriority($priority)) {
+            return ['error' => 'Invalid priority. Must be: background, normal, elevated, or urgent', 'status' => 400];
+        }
+
         $envelope = MesseAf::createEnvelope($ref, $auth['id'], $intent, $priority);
         $messages = [
             MesseAf::createRequestMessage($auth['id'], $intent, $context, $responseHint),
@@ -154,6 +159,12 @@ class Requests
         // Handle status change
         if (!empty($body['status']) && $body['status'] !== $oldStatus) {
             $newStatus = $body['status'];
+
+            // Validate status
+            if (!MesseAf::isValidStatus($newStatus)) {
+                return ['error' => 'Invalid status', 'status' => 400];
+            }
+
             $envelope['status'] = $newStatus;
 
             // Set executor on claim
@@ -219,7 +230,8 @@ class Requests
         }
 
         // Validate filename to prevent path traversal
-        if (str_contains($filename, '..') || str_contains($filename, '/')) {
+        if (str_contains($filename, '..') || str_contains($filename, '/') ||
+            str_contains($filename, '\\') || preg_match('/[\x00-\x1f\x7f]/', $filename)) {
             return ['error' => 'Invalid filename', 'status' => 400];
         }
 

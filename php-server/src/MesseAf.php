@@ -20,6 +20,54 @@ class MesseAf
         'expired' => 'canceled',
     ];
 
+    public const VALID_PRIORITIES = ['background', 'normal', 'elevated', 'urgent'];
+
+    /**
+     * Validate a status value
+     */
+    public static function isValidStatus(string $status): bool
+    {
+        return isset(self::STATUS_FOLDERS[$status]);
+    }
+
+    /**
+     * Validate a priority value
+     */
+    public static function isValidPriority(string $priority): bool
+    {
+        return in_array($priority, self::VALID_PRIORITIES, true);
+    }
+
+    /**
+     * Validate an exchange ID (alphanumeric with hyphens, 1-64 chars)
+     */
+    public static function isValidExchangeId(string $id): bool
+    {
+        if (strlen($id) < 1 || strlen($id) > 64) {
+            return false;
+        }
+        // Must be alphanumeric with hyphens/underscores, no path traversal
+        if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/', $id)) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Validate an executor ID (alphanumeric with hyphens, 1-64 chars)
+     */
+    public static function isValidExecutorId(string $id): bool
+    {
+        if (strlen($id) < 1 || strlen($id) > 64) {
+            return false;
+        }
+        // Must be alphanumeric with hyphens/underscores, no path traversal
+        if (!preg_match('/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/', $id)) {
+            return false;
+        }
+        return true;
+    }
+
     /**
      * Generate a new thread reference
      * Format: YYYY-MM-DD-XXXX (4 random alphanumeric)
